@@ -1,59 +1,121 @@
-# TwinLink Desktop for macOS
+# TwinLink
 
-本人代理型AIエージェント同士が構造化データで通信するためのプラットフォーム。
-仕様は [twinlink.md](twinlink.md) を参照。
+A communication platform for AI agents that act on your behalf. Instead of two people going back and forth to schedule a meeting or agree on terms, each person's delegated agent negotiates with the other over a structured protocol — and nothing gets executed until the human approves.
 
-## 構成
+TwinLink is a macOS desktop app I'm building as a personal project. This repo is the working codebase; the detailed internal design spec is kept private.
 
-- `apps/desktop/` — Tauri 2 + React + TypeScript のデスクトップアプリ
-- `services/local-core/` — Python (FastAPI) の Local Core。127.0.0.1限定で待ち受け、Bearerトークン認証必須
-- `scripts/` — 環境確認・開発用スクリプト
+## Why I'm building this
 
-## 必要環境
+Coordination is expensive. Picking a meeting time across busy calendars, or settling small terms between two parties, eats real time and attention even though the decision itself is trivial. Handing that off to an AI assistant sounds obvious, but two problems make it hard to trust:
 
-- macOS 13 Ventura以上（Apple Silicon / Intel）
-- Node.js 20以上・npm
-- Python 3.12以上・[uv](https://docs.astral.sh/uv/)
-- Rust（Tauriのビルドに必要。https://rustup.rs から導入）
-- Xcode Command Line Tools（`xcode-select --install`）
+1. **Privacy.** To negotiate a time, your agent has to reason over your calendar — but the other side should never see your raw schedule, only whether a proposed slot works.
+2. **Control.** An agent that can act for you is also an agent that can commit you to things you didn't want. There has to be a hard gate where a human signs off before anything real happens.
 
-環境確認:
+TwinLink is my attempt to build the plumbing for delegated agents that negotiate *without* leaking their principal's data and *without* acting without consent.
 
-```bash
-./scripts/check_macos_env.sh
+## How it works
+
+Each user runs a local node. Two nodes talk through a relay that only forwards messages — it never sees decrypted content or makes decisions.
+
+```
+  User A's Mac                    User B's Mac
+┌──────────────────┐          ┌──────────────────┐
+│ TwinLink Desktop │          │ TwinLink Desktop │
+│ (Tauri 2 + React)│          │ (Tauri 2 + React)│
+│        │         │          │        │         │
+│  random port +   │          │  random port +   │
+│  random token    │          │  random token    │
+│        ▼         │          │        ▼         │
+│  Local Core      │          │  Local Core      │
+│  (FastAPI,       │          │  (FastAPI,       │
+│   127.0.0.1 only)│          │   127.0.0.1 only)│
+│   └─ SQLite      │          │   └─ SQLite      │
+└────────┬─────────┘          └─────────┬────────┘
+         │                              │
+         └──────────► Relay ◄───────────┘
+              (forward-only: TTL,
+               destination authz,
+               size/rate limits,
+               minimal logging)
 ```
 
-## セットアップ
+The desktop app (Tauri 2 + React + TypeScript) is just the UI. The real work happens in the **Local Core**, a FastAPI service that binds to `127.0.0.1` only. Tauri launches it as a child process with a random port and a random bearer token per session, and kills it on exit so no orphan process is left listening. Every `/v1/*` route requires that token.
+
+## The agent-to-agent protocol
+
+Agents exchange structured messages, not free text. Each message has a typed `message_type`:
+
+`REQUEST` → `PROPOSE` → `COUNTER` → `ACCEPT` / `REJECT` → `REQUEST_APPROVAL` → `APPROVAL_RESULT` → `EXECUTE` → `RECEIPT`, plus `ERROR`.
+
+A negotiation is a state machine over these messages. Proposals and counter-proposals are exchanged as deltas rather than full state, so a round of haggling stays small. The schemas live in `packages/protocol/` as JSON Schema, shared between both sides.
+
+## Delegation, selective disclosure, and the human gate
+
+Three ideas do the heavy lifting:
+
+- **Clone agents.** When you delegate a task, TwinLink spins up a scoped agent (a "clone"). It starts in `review_required` state and cannot perform any high-privilege action until you explicitly activate it. The default profile denies destructive operations outright.
+- **Selective disclosure.** You configure, per peer, what your agent is allowed to reveal. A negotiating agent answers "does this slot work?" without ever transmitting the underlying calendar. Memories marked `secret` never leave the device and are never packed into a clone's context.
+- **Approval gate with expiry.** Before anything is executed, the protocol routes a `REQUEST_APPROVAL` to the human. Approvals carry an `expires_at`; once expired, the action can no longer run, so a stale "yes" from last week can't be replayed into an action today.
+
+## Security design
+
+The threat model assumes the relay is untrusted and the other agent may be adversarial. Some of the concrete decisions:
+
+- Local Core listens on `127.0.0.1` only — binding to `0.0.0.0` is explicitly disallowed.
+- Bearer token comparison uses constant-time comparison (`secrets.compare_digest`) to avoid timing leaks.
+- The app never builds shell command strings. External CLIs are invoked as a command name plus a validated argument array, never a concatenated string.
+- CLI detection is limited to `shutil.which` plus a `--version` probe. TwinLink never reads another tool's credentials.
+- Secrets go to the macOS Keychain (`com.twinlink.desktop`), never to SQLite or JSON on disk.
+
+More detail is in [`docs/security.md`](docs/security.md).
+
+## Status
+
+Under active development. The core negotiation loop, node identity, selective disclosure, the clone lifecycle, the relay, and the human-approval gate are implemented and demoable across two local nodes plus a relay (see [`docs/demo.md`](docs/demo.md)). Remaining work is the native Rust/Tauri packaging (Keychain integration, code signing) and distribution.
+
+Design notes in this repo:
+
+- [`docs/architecture.md`](docs/architecture.md) — component layout
+- [`docs/protocol.md`](docs/protocol.md) — the message protocol
+- [`docs/security.md`](docs/security.md) — security posture
+- [`docs/clone-memory.md`](docs/clone-memory.md) — clones and memory
+
+## Repository layout
+
+- `apps/desktop/` — Tauri 2 + React + TypeScript desktop app
+- `services/local-core/` — FastAPI Local Core (127.0.0.1 only, bearer auth required)
+- `services/relay/` — forward-only relay server
+- `packages/protocol/` — agent-to-agent message schemas (JSON Schema)
+- `scripts/` — environment checks and dev helpers
+
+## Tech stack
+
+TypeScript · React · Tauri 2 · Python · FastAPI · SQLite
+
+## Setup
+
+Requires macOS 13+, Node.js 20+, Python 3.12+ with [uv](https://docs.astral.sh/uv/), and Rust (for the Tauri build).
 
 ```bash
-npm install                      # フロントエンド依存
-cd services/local-core && uv sync --group dev   # Python依存
+npm install                                   # frontend deps
+cd services/local-core && uv sync --group dev # Python deps
+./scripts/check_macos_env.sh                  # verify toolchain
 ```
 
-## 起動
-
-### デスクトップアプリ（Rust導入後）
+Run the desktop app (Tauri generates a random port + token for the Local Core and tears it down on exit):
 
 ```bash
 ./scripts/dev_desktop.sh
-# または
-cd apps/desktop && npm run tauri dev
 ```
 
-TauriがLocal Coreをランダムポート＋ランダムトークンで自動起動し、
-アプリ終了時にプロセスも終了する。
-
-### Local Core単体（API開発・ブラウザ確認用）
+Run the Local Core on its own for API development:
 
 ```bash
-./scripts/dev_core.sh            # http://127.0.0.1:8765
-npm run dev                      # Vite (http://localhost:5173)
+./scripts/dev_core.sh   # http://127.0.0.1:8765
+npm run dev             # Vite dev server (http://localhost:5173)
 ```
 
-ブラウザ開発時の接続先は `VITE_CORE_PORT` / `VITE_CORE_TOKEN` で指定
-（既定: 8765 / dev-local-token。`.env.example` 参照）。
-
-## テスト
+## Tests
 
 ```bash
 # Python
@@ -63,19 +125,17 @@ uv run --group dev ruff check . && uv run --group dev mypy twinlink_core
 # TypeScript
 npm run test && npm run typecheck
 
-# Rust（Rust導入後）
+# Rust
 cd apps/desktop/src-tauri && cargo test
 ```
 
-## データ保存場所
+## Data locations
 
-- アプリデータ: `~/Library/Application Support/TwinLink/`（SQLite `twinlink.db`）
-- キャッシュ: `~/Library/Caches/TwinLink/`
-- ログ: `~/Library/Logs/TwinLink/`
-- 秘密情報: macOS Keychain（サービス名 `com.twinlink.desktop`）— ファイル保存禁止
+- App data: `~/Library/Application Support/TwinLink/` (SQLite `twinlink.db`)
+- Cache: `~/Library/Caches/TwinLink/`
+- Logs: `~/Library/Logs/TwinLink/`
+- Secrets: macOS Keychain (service `com.twinlink.desktop`) — never written to disk
 
-## 現在の実装状況
+---
 
-Phase 0（環境確認）・Phase 1（デスクトップシェル + Local Core起動）・
-Phase 2の基本モデル（User / CloneAgent）まで実装済み。
-詳細なフェーズ計画は twinlink.md §35 を参照。
+Built by [Nakamura Masashi](https://github.com/Maaa2005). See also [Stellise](https://github.com/Maaa2005/Stellise), an on-device AI alarm app on the App Store.

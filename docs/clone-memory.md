@@ -1,15 +1,12 @@
-# クローンと記憶
+# Clones and memory
 
-正は [twinlink.md §14–§20](../twinlink.md)。
+## Implemented (Phase 2 basics + clone skeleton)
 
-## 実装済み（Phase 2基本 + §14の骨格）
+- `CloneAgent` model: a freshly created clone is `review_required` and cannot perform high-privilege actions until the user activates it (`POST /v1/clones/{clone_id}/activate`).
+- `ensure_clone`: reuses an active clone first, then a pending draft, and only creates a new one if neither exists.
+- The default `coding_profile` denies `git_push`, `delete_files`, and `deploy`.
 
-- `CloneAgent` モデル（§18）: 生成直後は `review_required`。ユーザー確認
-  （`POST /v1/clones/{clone_id}/activate`）まで高権限操作を許可しない
-- `ensure_clone`: 有効なクローン→確認待ちドラフトの順で再利用し、なければ生成
-- 既定の `coding_profile` は git_push / delete_files / deploy を拒否
+## Not yet implemented
 
-## 未実装
-
-- `MemoryItem`（§17）・記憶ソース調査・分類・重複/矛盾処理（Phase 3）
-- `CloneContextPackage`（§20、Phase 5）
+- `MemoryItem`: memory-source discovery, classification, and duplicate/conflict handling (Phase 3).
+- `CloneContextPackage` (Phase 5).

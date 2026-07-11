@@ -22,3 +22,6 @@ target/
 .tmp/
 .env
 *.db
+
+# Private design spec (not for public repo)
+twinlink.md

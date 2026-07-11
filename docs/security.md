@@ -1,11 +1,11 @@
-# セキュリティ方針
+# Security posture
 
-正は [twinlink.md §7–§11, §23, §31](../twinlink.md)。実装済みの要点:
+Implemented so far:
 
-- Local Coreは `127.0.0.1` のみで待ち受け（`0.0.0.0` 禁止）
-- `/v1/*` はBearerトークン必須。トークンは起動ごとにTauriが生成
-- トークン比較は定数時間比較（`secrets.compare_digest`）
-- 子プロセス起動はコマンド名＋引数配列（シェル文字列連結禁止）
-- CLI検出は `shutil.which` ＋ `--version` のみ。認証情報は読まない
-- 秘密情報はSQLite/JSONへ保存しない。Keychain（`com.twinlink.desktop`）を使う（Phase 5で実装）
-- アプリ終了時にLocal Coreを終了し、孤立プロセスを残さない
+- The Local Core listens on `127.0.0.1` only. Binding to `0.0.0.0` is disallowed.
+- `/v1/*` requires a bearer token; Tauri generates a fresh token per session.
+- Token comparison uses constant-time comparison (`secrets.compare_digest`).
+- Child processes are launched as a command name plus an argument array — never a concatenated shell string.
+- CLI detection is limited to `shutil.which` plus a `--version` probe. Credentials of other tools are never read.
+- Secrets are not written to SQLite or JSON. They go to the macOS Keychain (`com.twinlink.desktop`); this is wired up in Phase 5.
+- The Local Core is terminated when the app exits, leaving no orphan process.
