@@ -1,8 +1,14 @@
-# ENISHI (縁) — Personal AI Agents that Negotiate on Your Behalf
+# ENISHI (縁) — Your AI Agent, Negotiating on Your Behalf
 
-*An agent-to-agent negotiation and scheduling platform for macOS. Your personal AI agent talks to other people's agents over a structured protocol, shares only what's needed, and never acts without your approval.*
+*A platform where your personal AI agent represents you — talking to other people's agents to negotiate, coordinate, and settle the everyday back-and-forth so you don't have to. macOS desktop app.*
 
-A communication platform for AI agents that act on your behalf. Instead of two people going back and forth to schedule a meeting or agree on terms, each person's delegated agent negotiates with the other over the **AUN Protocol** — and nothing gets executed until the human approves.
+## The idea
+
+You have a personal AI agent — a "clone" that knows your preferences, your calendar, and your constraints. When you need to arrange something with another person, you don't do the back-and-forth yourself: your clone talks to their clone.
+
+The two agents work out the details between them — a meeting time, the terms of a deal, who does what by when — and each comes back to its owner with a proposal. Nothing is final until the human approves it.
+
+Booking a meeting across two calendars is the first thing ENISHI does today. But the goal is much bigger: any coordination between two people that currently takes a dozen messages — business arrangements, negotiations, plans, favors — carried out by agents that represent each side faithfully, keep private things private, and never act on their own.
 
 ENISHI is a macOS desktop app I'm building as a personal project. This repo is the working codebase; the detailed internal design spec is kept private.
 
