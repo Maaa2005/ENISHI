@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://twinlink.local/schemas/negotiation-message.schema.json",
+  "title": "TwinLink Protocol 0.1 Negotiation Message",
+  "description": "twinlink.md §25 のエージェント間共通メッセージ形式",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "type": "string",
+      "const": "twinlink/0.1"
+    },
+    "message_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sender_agent_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "receiver_agent_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "message_type": {
+      "type": "string",
+      "enum": [
+        "REQUEST",
+        "PROPOSE",
+        "COUNTER",
+        "ACCEPT",
+        "REJECT",
+        "REQUEST_APPROVAL",
+        "APPROVAL_RESULT",
+        "EXECUTE",
+        "RECEIPT",
+        "ERROR"
+      ]
+    },
+    "intent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "payload": {
+      "type": "object"
+    },
+    "delta": {
+      "type": "object"
+    },
+    "requires_human_approval": {
+      "type": "boolean"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "protocol",
+    "message_id",
+    "session_id",
+    "sender_agent_id",
+    "receiver_agent_id",
+    "message_type",
+    "intent",
+    "session_version",
+    "payload",
+    "delta",
+    "requires_human_approval",
+    "created_at"
+  ],
+  "additionalProperties": false
+}

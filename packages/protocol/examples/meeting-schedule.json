@@ -1,0 +1,16 @@
+{
+  "intent": "meeting.schedule",
+  "target_agent_id": "tanaka-agent",
+  "topic": "AIエージェントの企画",
+  "duration_minutes": 30,
+  "date_range": {
+    "start": "2026-07-13",
+    "end": "2026-07-17"
+  },
+  "preferred_time_ranges": [
+    {
+      "start": "13:00",
+      "end": "18:00"
+    }
+  ]
+}

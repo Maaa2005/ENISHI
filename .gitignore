@@ -1,0 +1,24 @@
+# Node
+node_modules/
+dist/
+*.local
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+uv.lock
+
+# Rust
+target/
+
+# macOS
+.DS_Store
+
+# TwinLink
+.tmp/
+.env
+*.db

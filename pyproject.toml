@@ -1,0 +1,15 @@
+[tool.uv.workspace]
+members = ["services/local-core", "services/relay"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# B008: FastAPIのDepends()は引数デフォルトで使う設計のため除外
+ignore = ["B008"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
