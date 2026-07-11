@@ -1,4 +1,4 @@
-# TwinLink two-node + relay demo
+# ENISHI two-node + relay demo
 
 ## Start
 

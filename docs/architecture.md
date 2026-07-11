@@ -3,11 +3,11 @@
 ## Current state (Phase 0–2)
 
 ```
-TwinLink Desktop (Tauri 2 + React + TS)
+ENISHI Desktop (Tauri 2 + React + TS)
   └─ get_core_connection (Tauri command)
        │ random port + random token
        ▼
-TwinLink Local Core (FastAPI, 127.0.0.1 only)
+ENISHI Local Core (FastAPI, 127.0.0.1 only)
   ├─ /health
   └─ /v1/*  (bearer auth required)
        └─ SQLite (~/Library/Application Support/TwinLink/twinlink.db)

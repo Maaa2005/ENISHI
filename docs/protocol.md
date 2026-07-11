@@ -1,6 +1,6 @@
-# TwinLink Protocol 0.1
+# AUN Protocol 0.1
 
-The structured message format agents use to talk to each other.
+The structured message format ENISHI agents use to talk to each other.
 
 Every message shares a common envelope and carries a typed `message_type`:
 `REQUEST`, `PROPOSE`, `COUNTER`, `ACCEPT`, `REJECT`, `REQUEST_APPROVAL`,
