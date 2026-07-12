@@ -10,7 +10,9 @@ The two agents work out the details between them — a meeting time, the terms o
 
 Booking a meeting across two calendars is the first thing ENISHI does today. But the goal is much bigger: any coordination between two people that currently takes a dozen messages — business arrangements, negotiations, plans, favors — carried out by agents that represent each side faithfully, keep private things private, and never act on their own.
 
-ENISHI is a macOS desktop app I'm building as a personal project. This repo is the working codebase; the detailed internal design spec is kept private.
+Where this goes: once everyone has an agent that can speak for them, coordination stops being something you do by hand. You don't trade twenty messages to find a time, haggle over a delivery window, or chase three people for a sign-off — your agent and theirs settle it and hand each side the result to approve. The same rails work whether the other party is a friend, a client, or a company's agent. What ENISHI is really building is the protocol and the trust model that make that exchange safe: an agent that can prove who it speaks for, reveal only what it must, and never commit you to anything you didn't agree to. That's the connection — the 縁 — I want to make routine.
+
+ENISHI is a macOS desktop app I'm building as a personal project. It's early, and this repo is the working codebase; the detailed internal design spec is kept private.
 
 > **The names.** *Enishi* (縁) is the bond that forms between people. *Aun* (阿吽) comes from *a-un no kokyū* — the wordless, in-and-out breathing of two people who move in perfect sync. That is exactly what two delegated agents are meant to do: reach an understanding on their principals' behalf without either side having to spell everything out.
 
