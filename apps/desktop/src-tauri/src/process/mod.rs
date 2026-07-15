@@ -7,6 +7,7 @@ use rand::distributions::Alphanumeric;
 use rand::Rng;
 
 const TOKEN_LENGTH: usize = 48;
+const KEYRING_SERVICE: &str = "com.twinlink.desktop";
 
 /// 127.0.0.1で利用可能なランダムポートを確保する（twinlink.md §10）。
 pub fn pick_free_port() -> io::Result<u16> {
@@ -56,6 +57,9 @@ pub fn spawn_core(port: u16, token: &str) -> io::Result<Child> {
         .current_dir(core_directory())
         .env("TWINLINK_LOCAL_TOKEN", token)
         .env("TWINLINK_LOCAL_PORT", port.to_string())
+        // Tauri起動時はノード署名鍵をmacOS Keychainへ保存する。
+        // CLIデモはこの環境変数を持たないため0600ファイルを使う。
+        .env("TWINLINK_KEYRING_SERVICE", KEYRING_SERVICE)
         .stdin(Stdio::null())
         .spawn()
 }

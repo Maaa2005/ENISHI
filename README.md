@@ -77,13 +77,13 @@ The threat model assumes the relay is untrusted and the other agent may be adver
 - Bearer token comparison uses constant-time comparison (`secrets.compare_digest`) to avoid timing leaks.
 - The app never builds shell command strings. External CLIs are invoked as a command name plus a validated argument array, never a concatenated string.
 - CLI detection is limited to `shutil.which` plus a `--version` probe. ENISHI never reads another tool's credentials.
-- ENISHI does not store external-provider credentials. The node signing key is currently protected as a local `0600` file; moving it to the macOS Keychain is still pending.
+- ENISHI does not store external-provider credentials. Tauri-launched Local Core stores the node signing key in the macOS Keychain; standalone CLI demos use a local `0600` fallback file.
 
 More detail is in [`docs/security.md`](docs/security.md).
 
 ## Status
 
-Under active development. The core negotiation loop, node identity, selective disclosure, the clone lifecycle, the relay, and the human-approval gate are implemented and demoable across two local nodes plus a relay (see [`docs/demo.md`](docs/demo.md)). Remaining work is the native Rust/Tauri packaging (Keychain integration, code signing) and distribution.
+Under active development. The core negotiation loop, node identity, selective disclosure, the clone lifecycle, the relay, and the human-approval gate are implemented and demoable across two local nodes plus a relay (see [`docs/demo.md`](docs/demo.md)). Remaining native packaging work is the final app icon, code signing, notarization, and distribution.
 
 Design notes in this repo:
 

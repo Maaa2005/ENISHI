@@ -24,6 +24,44 @@ def test_keypair_stable_and_permissions(tmp_path: Path) -> None:
     assert mode == 0o600
 
 
+def test_keypair_uses_keyring_and_migrates_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import twinlink_core.security.keys as keys_module
+
+    monkeypatch.delenv("TWINLINK_KEYRING_SERVICE", raising=False)
+    original_identity, _ = ensure_node_keypair(tmp_path)
+    key_path = tmp_path / "keys" / "node_ed25519.key"
+    assert key_path.exists()
+
+    stored: dict[str, str] = {}
+    monkeypatch.setenv("TWINLINK_KEYRING_SERVICE", "com.twinlink.desktop.test")
+    monkeypatch.setattr(keys_module, "_keyring_get", lambda service: stored.get(service))
+    monkeypatch.setattr(
+        keys_module, "_keyring_set", lambda service, value: stored.__setitem__(service, value)
+    )
+
+    migrated_identity, _ = ensure_node_keypair(tmp_path)
+    reloaded_identity, _ = ensure_node_keypair(tmp_path)
+
+    assert migrated_identity == original_identity
+    assert reloaded_identity == original_identity
+    assert "com.twinlink.desktop.test" in stored
+    assert not key_path.exists()
+
+
+def test_keyring_corruption_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import twinlink_core.security.keys as keys_module
+
+    monkeypatch.setenv("TWINLINK_KEYRING_SERVICE", "com.twinlink.desktop.test")
+    monkeypatch.setattr(keys_module, "_keyring_get", lambda _service: "not-base64")
+
+    with pytest.raises(RuntimeError, match="Keychain"):
+        ensure_node_keypair(tmp_path)
+
+
 def _signed_envelope(tmp_path: Path) -> tuple[dict[str, object], str]:
     identity, private_key = ensure_node_keypair(tmp_path)
     envelope = build_envelope(
