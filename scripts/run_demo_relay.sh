@@ -22,6 +22,6 @@ export RELAY_MESSAGE_TTL_SECONDS="${RELAY_MESSAGE_TTL_SECONDS:-3600}"
 export RELAY_RATE_LIMIT_PER_MINUTE="${RELAY_RATE_LIMIT_PER_MINUTE:-120}"
 PORT="${RELAY_PORT:-8870}"
 
-echo "TwinLink Relay demo: http://127.0.0.1:${PORT}"
+echo "ENISHI Relay demo: http://127.0.0.1:${PORT}"
 echo "agents: ${RELAY_NODE_TOKENS}"
 exec uv run uvicorn relay.main:app --host 127.0.0.1 --port "$PORT"

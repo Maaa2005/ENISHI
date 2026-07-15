@@ -1,21 +1,31 @@
 import type {
   AgreementRead,
+  AgentIdentityRead,
+  AgentRequestCreateParams,
   AnyNegotiationCreateParams,
   ApprovalRead,
   CloneRead,
   CoreConnection,
+  DefaultDisclosurePolicyRead,
   EnvironmentInfo,
   HealthResponse,
+  MemorySourceSettingPatch,
+  MemorySourceSettingRead,
   MetricsSummary,
   MetricsExperimentRead,
   NegotiationMessageRead,
+  NegotiationDecisionRead,
   NegotiationMetrics,
   NegotiationRead,
   NodeIdentityRead,
   PeerCreateParams,
   PeerDisclosurePolicyRead,
   PeerRead,
+  PolicyRead,
+  ProviderStatusDetail,
+  RelayStatusRead,
   UserRead,
+  UserUpdateParams,
 } from "../types";
 
 export class TwinLinkApiError extends Error {
@@ -83,8 +93,79 @@ export class ApiClient {
     });
   }
 
+  updateUser(userId: string, params: UserUpdateParams): Promise<UserRead> {
+    return this.request<UserRead>(`/v1/users/${encodeURIComponent(userId)}`, {
+      method: "PUT",
+      body: JSON.stringify(params),
+    });
+  }
+
+  listMemorySources(): Promise<MemorySourceSettingRead[]> {
+    return this.request<MemorySourceSettingRead[]>("/v1/memory-sources");
+  }
+
+  putMemorySources(sources: MemorySourceSettingPatch[]): Promise<MemorySourceSettingRead[]> {
+    return this.request<MemorySourceSettingRead[]>("/v1/memory-sources", {
+      method: "PUT",
+      body: JSON.stringify({ sources }),
+    });
+  }
+
+  getDefaultDisclosure(): Promise<DefaultDisclosurePolicyRead> {
+    return this.request<DefaultDisclosurePolicyRead>("/v1/disclosure/default");
+  }
+
+  putDefaultDisclosure(
+    policy: Omit<DefaultDisclosurePolicyRead, "created_at" | "updated_at">,
+  ): Promise<DefaultDisclosurePolicyRead> {
+    return this.request<DefaultDisclosurePolicyRead>("/v1/disclosure/default", {
+      method: "PUT",
+      body: JSON.stringify(policy),
+    });
+  }
+
+  getDelegationPolicy(userId: string): Promise<PolicyRead> {
+    return this.request<PolicyRead>(
+      `/v1/policies/delegation?${new URLSearchParams({ user_id: userId }).toString()}`,
+    );
+  }
+
+  putDelegationPolicy(userId: string, rules: Record<string, boolean>): Promise<PolicyRead> {
+    return this.request<PolicyRead>("/v1/policies/delegation", {
+      method: "PUT",
+      body: JSON.stringify({ user_id: userId, rules }),
+    });
+  }
+
+  getApprovalRulesPolicy(userId: string): Promise<PolicyRead> {
+    return this.request<PolicyRead>(
+      `/v1/policies/approval-rules?${new URLSearchParams({ user_id: userId }).toString()}`,
+    );
+  }
+
+  putApprovalRulesPolicy(userId: string, rules: Record<string, boolean>): Promise<PolicyRead> {
+    return this.request<PolicyRead>("/v1/policies/approval-rules", {
+      method: "PUT",
+      body: JSON.stringify({ user_id: userId, rules }),
+    });
+  }
+
+  listProviders(): Promise<ProviderStatusDetail[]> {
+    return this.request<ProviderStatusDetail[]>("/v1/providers");
+  }
+
   getNodeIdentity(): Promise<NodeIdentityRead> {
     return this.request<NodeIdentityRead>("/v1/node/identity");
+  }
+
+  getAgentIdentity(userId: string): Promise<AgentIdentityRead> {
+    return this.request<AgentIdentityRead>(
+      `/v1/agent/identity?user_id=${encodeURIComponent(userId)}`,
+    );
+  }
+
+  getRelayStatus(): Promise<RelayStatusRead> {
+    return this.request<RelayStatusRead>("/v1/relay/status");
   }
 
   listPeers(): Promise<PeerRead[]> {
@@ -151,12 +232,25 @@ export class ApiClient {
     });
   }
 
+  createAgentRequest(params: AgentRequestCreateParams): Promise<NegotiationRead> {
+    return this.request<NegotiationRead>("/v1/agent/requests", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
+
   listNegotiationMessages(sessionId: string): Promise<NegotiationMessageRead[]> {
     return this.request<NegotiationMessageRead[]>(`/v1/negotiations/${sessionId}/messages`);
   }
 
   getNegotiationMetrics(sessionId: string): Promise<NegotiationMetrics> {
     return this.request<NegotiationMetrics>(`/v1/metrics/negotiations/${sessionId}`);
+  }
+
+  getNegotiationDecision(sessionId: string): Promise<NegotiationDecisionRead | null> {
+    return this.request<NegotiationDecisionRead | null>(
+      `/v1/negotiations/${encodeURIComponent(sessionId)}/decision`,
+    );
   }
 
   getMetricsSummary(): Promise<MetricsSummary> {

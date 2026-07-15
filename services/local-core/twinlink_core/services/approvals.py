@@ -57,6 +57,13 @@ def expire_if_needed(session: Session, approval: Approval) -> Approval:
     if _as_utc(approval.expires_at) > now:
         return approval
 
+    if approval.action_type == "negotiation_decision" and approval.payload.get("remote"):
+        from twinlink_core.services.remote_negotiation import resolve_remote_approval
+
+        return resolve_remote_approval(
+            session, approval.id, ApprovalStatus.EXPIRED.value
+        )
+
     approval.status = ApprovalStatus.EXPIRED.value
     approval.resolved_at = now
     session.commit()

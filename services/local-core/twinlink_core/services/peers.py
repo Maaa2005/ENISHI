@@ -11,7 +11,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from twinlink_core.errors import TwinLinkError
-from twinlink_core.models import MemoryItem, PeerAgent, PeerDisclosurePolicy, PeerStatus
+from twinlink_core.models import (
+    DefaultDisclosurePolicy,
+    MemoryItem,
+    PeerAgent,
+    PeerDisclosurePolicy,
+    PeerStatus,
+)
 from twinlink_core.services.audit import log_event
 
 _SENSITIVITY_RANK = {
@@ -37,7 +43,13 @@ def list_peers(session: Session) -> list[PeerAgent]:
 
 
 def register_peer(
-    session: Session, *, agent_id: str, display_name: str, public_key: str
+    session: Session,
+    *,
+    agent_id: str,
+    display_name: str,
+    public_key: str,
+    personal_agent_id: str | None = None,
+    aliases: list[str] | None = None,
 ) -> PeerAgent:
     if session.get(PeerAgent, agent_id) is not None:
         raise TwinLinkError(
@@ -49,8 +61,10 @@ def register_peer(
     peer = PeerAgent(
         agent_id=agent_id,
         display_name=display_name,
+        aliases=list(dict.fromkeys(alias.strip() for alias in (aliases or []) if alias.strip())),
         public_key=public_key,
         fingerprint=_fingerprint(public_key),
+        personal_agent_id=personal_agent_id,
     )
     session.add(peer)
     session.commit()
@@ -88,12 +102,72 @@ def default_disclosure_policy(agent_id: str) -> PeerDisclosurePolicy:
     )
 
 
+def _reject_non_exportable_sensitivity(max_sensitivity: str) -> None:
+    if _SENSITIVITY_RANK.get(max_sensitivity, 4) >= _SENSITIVITY_RANK["restricted"]:
+        raise TwinLinkError(
+            code="DISCLOSURE_POLICY_INVALID",
+            message="restricted/secret は既定開示の上限に指定できません。",
+            status_code=422,
+            details={"max_sensitivity": max_sensitivity},
+        )
+
+
+def _default_row(session: Session) -> DefaultDisclosurePolicy:
+    row = session.get(DefaultDisclosurePolicy, "default")
+    if row is None:
+        row = DefaultDisclosurePolicy(
+            id="default",
+            allowed_memory_types=[],
+            max_sensitivity="internal",
+            share_schedule=True,
+            share_skills=False,
+            extra={},
+        )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+    return row
+
+
+def get_default_disclosure_policy(session: Session) -> DefaultDisclosurePolicy:
+    return _default_row(session)
+
+
+def put_default_disclosure_policy(
+    session: Session,
+    *,
+    allowed_memory_types: list[str],
+    max_sensitivity: str,
+    share_schedule: bool,
+    share_skills: bool,
+    extra: dict[str, object],
+) -> DefaultDisclosurePolicy:
+    _reject_non_exportable_sensitivity(max_sensitivity)
+    row = _default_row(session)
+    row.allowed_memory_types = list(allowed_memory_types)
+    row.max_sensitivity = max_sensitivity
+    row.share_schedule = share_schedule
+    row.share_skills = share_skills
+    row.extra = dict(extra)
+    session.commit()
+    session.refresh(row)
+    return row
+
+
 def get_disclosure_policy(session: Session, agent_id: str) -> PeerDisclosurePolicy:
     """相手別の情報公開設定を取得する。未設定時は保存せず既定値を返す。"""
     _get_peer(session, agent_id)
     policy = session.get(PeerDisclosurePolicy, agent_id)
     if policy is None:
-        return default_disclosure_policy(agent_id)
+        default = get_default_disclosure_policy(session)
+        return PeerDisclosurePolicy(
+            peer_agent_id=agent_id,
+            allowed_memory_types=list(default.allowed_memory_types),
+            max_sensitivity=default.max_sensitivity,
+            share_schedule=default.share_schedule,
+            share_skills=default.share_skills,
+            extra=dict(default.extra),
+        )
     return policy
 
 
@@ -108,6 +182,7 @@ def put_disclosure_policy(
     extra: dict[str, object],
 ) -> PeerDisclosurePolicy:
     """相手別の情報公開設定を保存する（twinlink.md 方針修正 §4）。"""
+    _reject_non_exportable_sensitivity(max_sensitivity)
     _get_peer(session, agent_id)
     policy = session.get(PeerDisclosurePolicy, agent_id)
     if policy is None:

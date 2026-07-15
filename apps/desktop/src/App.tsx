@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AgreementsPage } from "./pages/AgreementsPage";
+import { AgentSetupPage } from "./pages/AgentSetupPage";
 import { ApprovalsPage } from "./pages/ApprovalsPage";
 import { HomePage } from "./pages/HomePage";
 import { MetricsPage } from "./pages/MetricsPage";
@@ -8,9 +9,11 @@ import { PeersPage } from "./pages/PeersPage";
 import { ApiClient } from "./services/api";
 import { resolveCoreConnection } from "./services/backend";
 import { useAppStore } from "./stores/appStore";
+import "./styles.css";
 
 type Tab =
   | "home"
+  | "agentSetup"
   | "peers"
   | "negotiations"
   | "agreements"
@@ -22,25 +25,26 @@ type Tab =
   | "agents"
   | "tasks";
 
-const TABS: Array<[Tab, string]> = [
-  ["home", "ホーム"],
-  ["peers", "Peers"],
-  ["negotiations", "交渉"],
-  ["agreements", "合意"],
-  ["approvals", "承認"],
-  ["memories", "記憶"],
-  ["metrics", "メトリクス"],
-  ["clones", "クローン"],
-  ["projects", "プロジェクト"],
-  ["agents", "エージェント"],
-  ["tasks", "新規タスク"],
+const TABS: Array<[Tab, string, string, string]> = [
+  ["home", "概要", "⌂", "メイン"],
+  ["approvals", "承認", "✓", "メイン"],
+  ["negotiations", "交渉", "⇄", "メイン"],
+  ["agreements", "合意", "◇", "メイン"],
+  ["peers", "接続相手", "◎", "メイン"],
+  ["agentSetup", "代理AI設定", "✦", "エージェント"],
+  ["memories", "記憶", "▤", "エージェント"],
+  ["clones", "クローン", "◉", "エージェント"],
+  ["projects", "プロジェクト", "▱", "開発"],
+  ["agents", "外部エージェント", "⌘", "開発"],
+  ["tasks", "新規タスク", "+", "開発"],
+  ["metrics", "メトリクス", "⌁", "開発"],
 ];
 
 function PlaceholderPage({ title }: { title: string }) {
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem", maxWidth: 720 }}>
-      <h1>{title}</h1>
-      <p>既存の拡張APIを維持し、中核MVP完了後に画面を拡張します。</p>
+    <main className="page">
+      <header className="page-header"><p className="eyebrow">ENISHI</p><h1>{title}</h1></header>
+      <section className="empty-state"><div className="empty-icon">◇</div><h2>準備中です</h2><p>この機能は今後のアップデートで利用できるようになります。</p></section>
     </main>
   );
 }
@@ -65,36 +69,33 @@ export function App() {
   }, [refresh]);
 
   return (
-    <div>
-      <nav
-        style={{
-          display: "flex",
-          gap: "0.5rem",
-          padding: "0.75rem 2rem",
-          borderBottom: "1px solid #ddd",
-          fontFamily: "system-ui, sans-serif",
-        }}
-      >
-        {TABS.map(([key, label]) => (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="titlebar-drag" data-tauri-drag-region />
+        <div className="brand"><span className="brand-mark">縁</span><div><strong>ENISHI</strong><small>Personal Agent</small></div></div>
+        <nav className="sidebar-nav">
+        {TABS.map(([key, label, icon, group], index) => (
+          <div key={key}>
+          {(index === 0 || TABS[index - 1][3] !== group) && <p className="nav-group">{group}</p>}
           <button
-            key={key}
             onClick={() => setTab(key)}
-            style={{
-              padding: "0.4rem 0.9rem",
-              borderRadius: 4,
-              border: "1px solid #ccc",
-              background: tab === key ? "#eef" : "#fff",
-              fontWeight: tab === key ? 600 : 400,
-              cursor: "pointer",
-            }}
+            className={`nav-item ${tab === key ? "active" : ""}`}
           >
-            {label}
+            <span className="nav-icon">{icon}</span><span>{label}</span>
+            {key === "approvals" && <ApprovalBadge />}
           </button>
+          </div>
         ))}
-      </nav>
-      {tab === "home" && <HomePage />}
+        </nav>
+        <div className="sidebar-footer"><span className={`status-dot ${client ? "online" : ""}`} /><span>{client ? "Local Core 接続済み" : "接続中…"}</span></div>
+      </aside>
+      <div className="content-pane">
+      {tab === "home" && <HomePage client={client} />}
+      {tab === "agentSetup" && (
+        <AgentSetupPage client={client} onOpenPeers={() => setTab("peers")} />
+      )}
       {tab === "peers" && <PeersPage client={client} />}
-      {tab === "negotiations" && <NegotiationsPage client={client} />}
+      {tab === "negotiations" && <NegotiationsPage client={client} onOpenApprovals={() => setTab("approvals")} />}
       {tab === "agreements" && <AgreementsPage client={client} />}
       {tab === "approvals" && <ApprovalsPage client={client} />}
       {tab === "memories" && <PlaceholderPage title="記憶" />}
@@ -103,6 +104,12 @@ export function App() {
       {tab === "projects" && <PlaceholderPage title="プロジェクト" />}
       {tab === "agents" && <PlaceholderPage title="外部エージェント" />}
       {tab === "tasks" && <PlaceholderPage title="新規タスク" />}
+      </div>
     </div>
   );
+}
+
+function ApprovalBadge() {
+  const count = useAppStore((state) => state.approvals.filter((item) => item.status === "pending").length);
+  return count > 0 ? <span className="nav-badge">{count}</span> : null;
 }

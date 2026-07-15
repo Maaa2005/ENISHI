@@ -30,6 +30,7 @@ from twinlink_core.providers.base import CodingTaskResult
 from twinlink_core.services.approvals import create_approval
 from twinlink_core.services.audit import log_event
 from twinlink_core.services.context_builder import build_context_package
+from twinlink_core.services.policies import approval_required, delegation_enabled
 
 LEVEL3_OPERATIONS = {
     "git_push",
@@ -52,6 +53,12 @@ LEVEL2_OPERATIONS = {
 _TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 _TERMINAL_STATUSES_WITH_EXPIRED = {"completed", "failed", "cancelled", "expired"}
 _PROJECT_PERMISSION_ALIASES = {"delete_files": "delete"}
+_APPROVAL_RULE_ACTIONS = {
+    "delete_files": "file_delete",
+    "use_network": "external_publish",
+    "git_push": "git_push",
+    "deploy": "external_publish",
+}
 
 
 def _validate_user_and_clone(session: Session, user_id: str, clone_id: str) -> CloneAgent:
@@ -179,6 +186,13 @@ def create_task(
 ) -> CodingTask:
     operations = requested_operations or []
     _validate_user_and_clone(session, user_id, clone_id)
+    if not delegation_enabled(session, user_id, "coding_task", default=True):
+        raise TwinLinkError(
+            code="TASK_PERMISSION_DENIED",
+            message="コーディングタスクは委任されていません。",
+            status_code=403,
+            details={"operation": "coding_task"},
+        )
     project = session.get(LocalProject, project_id) if project_id is not None else None
     if project_id is not None and project is None:
         raise TwinLinkError(
@@ -190,7 +204,13 @@ def create_task(
     _validate_operations(project, operations)
     get_adapter(provider)
 
-    level2_operations = sorted(set(operations) & LEVEL2_OPERATIONS)
+    level2_operations = sorted(
+        operation
+        for operation in set(operations) & LEVEL2_OPERATIONS
+        if approval_required(
+            session, user_id, _APPROVAL_RULE_ACTIONS.get(operation, operation), default=True
+        )
+    )
     requires_approval = bool(level2_operations)
     initial_status = (
         CodingTaskStatus.WAITING_APPROVAL.value

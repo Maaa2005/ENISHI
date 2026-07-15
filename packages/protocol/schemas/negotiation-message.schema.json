@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://twinlink.local/schemas/negotiation-message.schema.json",
-  "title": "TwinLink Protocol 0.1 Negotiation Message",
+  "title": "AUN Protocol 0.1 Negotiation Message",
   "description": "twinlink.md §25 のエージェント間共通メッセージ形式",
   "type": "object",
   "properties": {
@@ -22,6 +22,14 @@
       "minLength": 1
     },
     "receiver_agent_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sender_node_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "receiver_node_id": {
       "type": "string",
       "minLength": 1
     },
@@ -57,6 +65,22 @@
     "requires_human_approval": {
       "type": "boolean"
     },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "nonce": {
+      "type": "string",
+      "minLength": 1
+    },
+    "payload_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "signature": {
+      "type": "string",
+      "minLength": 1
+    },
     "created_at": {
       "type": "string",
       "format": "date-time"
@@ -71,10 +95,18 @@
     "message_type",
     "intent",
     "session_version",
+    "sequence",
     "payload",
     "delta",
     "requires_human_approval",
-    "created_at"
+    "nonce",
+    "created_at",
+    "payload_hash",
+    "signature"
   ],
+  "dependentRequired": {
+    "sender_node_id": ["receiver_node_id"],
+    "receiver_node_id": ["sender_node_id"]
+  },
   "additionalProperties": false
 }

@@ -1,4 +1,4 @@
-"""TwinLink Local Core エントリポイント。
+"""ENISHI Local Core エントリポイント。
 
 開発時:
     uvicorn twinlink_core.main:app --host 127.0.0.1 --port 8765
@@ -17,6 +17,7 @@ from twinlink_core.api.routes import health_router, v1_router
 from twinlink_core.config import get_settings
 from twinlink_core.database import get_session, init_database
 from twinlink_core.errors import register_error_handlers
+from twinlink_core.services.relay_worker import worker_loop as relay_worker_loop
 from twinlink_core.services.tasks import recover_interrupted_tasks, worker_loop
 
 
@@ -33,15 +34,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     stop_event = asyncio.Event()
     worker = asyncio.create_task(worker_loop(stop_event))
+    relay_worker = asyncio.create_task(relay_worker_loop(stop_event))
     try:
         yield
     finally:
         stop_event.set()
-        await worker
+        await asyncio.gather(worker, relay_worker)
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="TwinLink Local Core", version=__version__, lifespan=lifespan)
+    app = FastAPI(title="ENISHI Local Core", version=__version__, lifespan=lifespan)
     register_error_handlers(app)
     app.include_router(health_router)
     app.include_router(v1_router)

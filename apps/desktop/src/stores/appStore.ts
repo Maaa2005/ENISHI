@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ApiClient } from "../services/api";
+import { TwinLinkApiError, type ApiClient } from "../services/api";
 import type {
   AgreementRead,
   ApprovalRead,
@@ -9,6 +9,8 @@ import type {
   MetricsSummary,
   NegotiationRead,
   PeerRead,
+  RelayStatusRead,
+  UserRead,
 } from "../types";
 
 export interface AppState {
@@ -22,7 +24,13 @@ export interface AppState {
   approvals: ApprovalRead[];
   agreements: AgreementRead[];
   metrics: MetricsSummary | null;
+  users: UserRead[];
+  relayStatus: RelayStatusRead | null;
+  requesting: boolean;
+  requestError: string | null;
+  requestCandidates: Array<{ agent_id: string; display_name: string }>;
   refresh: (client: ApiClient) => Promise<void>;
+  submitAgentRequest: (client: ApiClient, userId: string, text: string, peerAgentId?: string) => Promise<boolean>;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -36,6 +44,42 @@ export const useAppStore = create<AppState>((set) => ({
   approvals: [],
   agreements: [],
   metrics: null,
+  users: [],
+  relayStatus: null,
+  requesting: false,
+  requestError: null,
+  requestCandidates: [],
+
+  submitAgentRequest: async (client, userId, text, peerAgentId) => {
+    set({ requesting: true, requestError: null, requestCandidates: [] });
+    try {
+      const negotiation = await client.createAgentRequest({
+        user_id: userId,
+        text,
+        ...(peerAgentId ? { peer_agent_id: peerAgentId } : {}),
+      });
+      set((state) => ({
+        requesting: false,
+        negotiations: [negotiation, ...state.negotiations.filter((n) => n.id !== negotiation.id)],
+      }));
+      return true;
+    } catch (error) {
+      const candidates = error instanceof TwinLinkApiError && Array.isArray(error.details.candidates)
+        ? error.details.candidates.filter(
+          (item): item is { agent_id: string; display_name: string } =>
+            typeof item === "object" && item !== null &&
+            typeof (item as Record<string, unknown>).agent_id === "string" &&
+            typeof (item as Record<string, unknown>).display_name === "string",
+        )
+        : [];
+      set({
+        requesting: false,
+        requestError: error instanceof Error ? error.message : String(error),
+        requestCandidates: candidates,
+      });
+      return false;
+    }
+  },
 
   refresh: async (client: ApiClient) => {
     set({ loading: true, error: null });
@@ -44,22 +88,25 @@ export const useAppStore = create<AppState>((set) => ({
       const environment = await client.getEnvironment();
       const users = await client.listUsers();
       const clones = users.length > 0 ? await client.listClones(users[0].id) : [];
-      const [peers, negotiations, approvals, agreements, metrics] = await Promise.all([
+      const [peers, negotiations, approvals, agreements, metrics, relayStatus] = await Promise.all([
         client.listPeers(),
         client.listNegotiations(),
         client.listApprovals(),
         client.listAgreements(),
         client.getMetricsSummary(),
+        client.getRelayStatus(),
       ]);
       set({
         health,
         environment,
+        users,
         clones,
         peers,
         negotiations,
         approvals,
         agreements,
         metrics,
+        relayStatus,
         loading: false,
       });
     } catch (error) {

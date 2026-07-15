@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ApiClient } from "../services/api";
 import type { PeerDisclosurePolicyRead, PeerRead } from "../types";
+import { useAppStore } from "../stores/appStore";
 
 const memoryTypes = [
   "identity",
@@ -17,7 +18,7 @@ const memoryTypes = [
   "schedule",
 ];
 
-const sensitivities = ["public", "internal", "private", "restricted", "secret"];
+const sensitivities = ["public", "internal", "private"];
 
 const sectionStyle: React.CSSProperties = {
   border: "1px solid #ddd",
@@ -104,13 +105,18 @@ function DisclosureEditor({
 }
 
 export function PeersPage({ client }: { client: ApiClient | null }) {
+  const users = useAppStore((state) => state.users);
   const [identity, setIdentity] = useState("");
+  const [personalIdentity, setPersonalIdentity] = useState("");
+  const [ownPublicKey, setOwnPublicKey] = useState("");
   const [peers, setPeers] = useState<PeerRead[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [policy, setPolicy] = useState<PeerDisclosurePolicyRead | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [agentId, setAgentId] = useState("");
+  const [personalAgentId, setPersonalAgentId] = useState("");
+  const [aliases, setAliases] = useState("");
   const [publicKey, setPublicKey] = useState("");
 
   const selectedPeer = useMemo(
@@ -118,12 +124,27 @@ export function PeersPage({ client }: { client: ApiClient | null }) {
     [peers, selected],
   );
 
+  const runAction = async (action: () => Promise<void>) => {
+    setError(null);
+    try {
+      await action();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const load = async () => {
     if (!client) return;
     setError(null);
     try {
-      const [node, peerRows] = await Promise.all([client.getNodeIdentity(), client.listPeers()]);
+      const [node, peerRows, personal] = await Promise.all([
+        client.getNodeIdentity(),
+        client.listPeers(),
+        users[0] ? client.getAgentIdentity(users[0].id) : Promise.resolve(null),
+      ]);
       setIdentity(`${node.agent_id} / ${node.fingerprint}`);
+      setPersonalIdentity(personal?.personal_agent_id ?? "");
+      setOwnPublicKey(personal?.public_key ?? node.public_key);
       setPeers(peerRows);
       if (!selected && peerRows[0]) setSelected(peerRows[0].agent_id);
     } catch (err) {
@@ -133,7 +154,7 @@ export function PeersPage({ client }: { client: ApiClient | null }) {
 
   useEffect(() => {
     void load();
-  }, [client]);
+  }, [client, users]);
 
   useEffect(() => {
     if (!client || !selected) {
@@ -148,44 +169,72 @@ export function PeersPage({ client }: { client: ApiClient | null }) {
 
   const register = async () => {
     if (!client) return;
-    await client.createPeer({ agent_id: agentId, display_name: displayName, public_key: publicKey });
-    setAgentId("");
-    setDisplayName("");
-    setPublicKey("");
-    await load();
+    await runAction(async () => {
+      await client.createPeer({
+        agent_id: agentId,
+        personal_agent_id: personalAgentId || undefined,
+        aliases: aliases.split(",").map((value) => value.trim()).filter(Boolean),
+        display_name: displayName,
+        public_key: publicKey,
+      });
+      setAgentId("");
+      setPersonalAgentId("");
+      setAliases("");
+      setDisplayName("");
+      setPublicKey("");
+      await load();
+    });
   };
 
   const trust = async (peer: PeerRead) => {
     if (!client) return;
-    await client.trustPeer(peer.agent_id);
-    await load();
+    await runAction(async () => {
+      await client.trustPeer(peer.agent_id);
+      await load();
+    });
   };
 
   const block = async (peer: PeerRead) => {
     if (!client) return;
-    await client.blockPeer(peer.agent_id);
-    await load();
+    await runAction(async () => {
+      await client.blockPeer(peer.agent_id);
+      await load();
+    });
   };
 
   const savePolicy = async () => {
     if (!client || !selected || !policy) return;
-    setPolicy(await client.putPeerDisclosure(selected, policy));
+    await runAction(async () => {
+      setPolicy(await client.putPeerDisclosure(selected, policy));
+    });
   };
 
   return (
     <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem", maxWidth: 1100 }}>
       <h1>接続相手</h1>
       {error && <p style={{ color: "#c0392b" }}>{error}</p>}
-      <p>自ノード: {identity || "確認中"}</p>
+      <p>自分の代理AI: {personalIdentity || "確認中"}</p>
+      <p>この端末: {identity || "確認中"}</p>
+      {ownPublicKey && <p>共有する公開鍵: {ownPublicKey}</p>}
 
       <section style={{ ...sectionStyle, marginBottom: "1rem" }}>
         <h3 style={{ marginTop: 0 }}>ペアリング登録</h3>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-          <input placeholder="agent_id" value={agentId} onChange={(e) => setAgentId(e.target.value)} />
+          <input placeholder="端末Node ID" value={agentId} onChange={(e) => setAgentId(e.target.value)} />
+          <input
+            placeholder="Personal Agent ID"
+            value={personalAgentId}
+            onChange={(e) => setPersonalAgentId(e.target.value)}
+          />
           <input
             placeholder="表示名"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
+          />
+          <input
+            placeholder="別名（カンマ区切り）"
+            value={aliases}
+            onChange={(e) => setAliases(e.target.value)}
           />
           <input
             placeholder="公開鍵"
@@ -221,6 +270,12 @@ export function PeersPage({ client }: { client: ApiClient | null }) {
               <strong>{peer.display_name}</strong> {statusLabel(peer.status)}
               <br />
               <span style={{ color: "#555" }}>{peer.fingerprint}</span>
+              {peer.personal_agent_id && (
+                <><br /><span style={{ color: "#777" }}>{peer.personal_agent_id}</span></>
+              )}
+              {peer.aliases.length > 0 && (
+                <><br /><span style={{ color: "#777" }}>別名: {peer.aliases.join("、")}</span></>
+              )}
             </button>
           ))}
           {selectedPeer && (

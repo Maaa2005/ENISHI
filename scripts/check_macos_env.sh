@@ -1,5 +1,5 @@
 #!/bin/bash
-# TwinLink macOS環境確認スクリプト（twinlink.md §5）
+# ENISHI macOS環境確認スクリプト（twinlink.md §5）
 # 不足ツールを検出して表示する。インストールは行わない。
 set -u
 
@@ -8,7 +8,7 @@ MISSING=()
 ok()   { printf "  ✓ %s\n" "$1"; }
 ng()   { printf "  ✗ %s\n" "$1"; MISSING+=("$2"); }
 
-echo "TwinLink macOS環境確認"
+echo "ENISHI macOS環境確認"
 echo "======================"
 
 # macOSバージョン

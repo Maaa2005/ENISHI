@@ -29,8 +29,16 @@ class EnvironmentInfo(BaseModel):
 
 class UserCreate(BaseModel):
     display_name: str = Field(min_length=1, max_length=200)
+    nickname: str | None = Field(default=None, max_length=200)
     timezone: str = "Asia/Tokyo"
     language: str = "ja"
+
+
+class UserUpdate(BaseModel):
+    display_name: str = Field(min_length=1, max_length=200)
+    nickname: str | None = Field(default=None, max_length=200)
+    timezone: str = Field(min_length=1, max_length=64)
+    language: str = Field(min_length=1, max_length=16)
 
 
 class UserRead(BaseModel):
@@ -38,9 +46,11 @@ class UserRead(BaseModel):
 
     id: str
     display_name: str
+    nickname: str | None
     timezone: str
     language: str
     created_at: datetime
+    updated_at: datetime
 
 
 class CloneEnsureRequest(BaseModel):
@@ -233,12 +243,20 @@ class RemoteNegotiationCreate(BaseModel):
     preferred_time_ranges: list[TimeRange] = Field(min_length=1)
 
 
+class AgentRequestCreate(BaseModel):
+    user_id: str
+    text: str = Field(min_length=1, max_length=2000)
+    peer_agent_id: str | None = None
+
+
 class NegotiationRead(BaseModel):
     model_config = {"from_attributes": True}
 
     id: str
     initiator_clone_id: str
     responder_clone_id: str
+    initiator_agent_id: str | None
+    responder_agent_id: str | None
     intent: str
     topic: str
     status: str
@@ -261,6 +279,17 @@ class NegotiationMessageRead(BaseModel):
     payload: dict[str, Any]
     delta: dict[str, Any]
     requires_human_approval: bool
+    created_at: datetime
+
+
+class NegotiationDecisionRead(BaseModel):
+    model_config = {"from_attributes": True}
+
+    policy_version: int
+    outcome: str
+    reason_codes: list[str]
+    evidence: dict[str, Any]
+    confidence: float
     created_at: datetime
 
 
@@ -352,9 +381,20 @@ class NodeIdentityRead(BaseModel):
     fingerprint: str
 
 
+class AgentIdentityRead(BaseModel):
+    personal_agent_id: str
+    user_id: str
+    active_clone_id: str | None
+    node_id: str
+    public_key: str
+    fingerprint: str
+
+
 class PeerCreate(BaseModel):
     agent_id: str = Field(min_length=1, max_length=64)
+    personal_agent_id: str | None = Field(default=None, min_length=1, max_length=64)
     display_name: str = Field(min_length=1, max_length=200)
+    aliases: list[str] = Field(default_factory=list, max_length=20)
     public_key: str = Field(min_length=1, max_length=200)
 
 
@@ -362,7 +402,9 @@ class PeerRead(BaseModel):
     model_config = {"from_attributes": True}
 
     agent_id: str
+    personal_agent_id: str | None
     display_name: str
+    aliases: list[str]
     public_key: str
     fingerprint: str
     status: str
@@ -389,6 +431,53 @@ class PeerDisclosurePolicyRead(BaseModel):
     extra: dict[str, Any]
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+class DefaultDisclosurePolicyRead(BaseModel):
+    model_config = {"from_attributes": True}
+
+    allowed_memory_types: list[str]
+    max_sensitivity: str
+    share_schedule: bool
+    share_skills: bool
+    extra: dict[str, Any]
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class MemorySourceSettingPatch(BaseModel):
+    source: str = Field(min_length=1, max_length=64)
+    enabled: bool
+    scope: str = Field(default="", max_length=500)
+
+
+class MemorySourceSettingsUpdate(BaseModel):
+    sources: list[MemorySourceSettingPatch]
+
+
+class MemorySourceSettingRead(BaseModel):
+    model_config = {"from_attributes": True}
+
+    source: str
+    connected: bool
+    enabled: bool
+    scope: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class PolicyRead(BaseModel):
+    user_id: str
+    name: str
+    rules: dict[str, bool]
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class PolicyUpdate(BaseModel):
+    user_id: str
+    rules: dict[str, bool] = Field(default_factory=dict)
 
 
 class AgreementPatch(BaseModel):

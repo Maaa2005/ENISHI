@@ -4,7 +4,7 @@ import enum
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Float, ForeignKey, String
+from sqlalchemy import JSON, Boolean, Float, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from twinlink_core.models.base import Base, new_id, utc_now
@@ -61,5 +61,16 @@ class MemoryItem(Base):
     effective_until: Mapped[datetime | None] = mapped_column(nullable=True)
 
     status: Mapped[str] = mapped_column(String(16), default=MemoryStatus.ACTIVE.value, index=True)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
+
+
+class MemorySourceSetting(Base):
+    __tablename__ = "memory_source_settings"
+
+    source: Mapped[str] = mapped_column(String(64), primary_key=True)
+    connected: Mapped[bool] = mapped_column(Boolean, default=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    scope: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)

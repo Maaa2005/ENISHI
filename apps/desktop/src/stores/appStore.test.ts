@@ -22,6 +22,13 @@ function makeClient(overrides: Partial<Record<keyof ApiClient, unknown>> = {}): 
     listApprovals: vi.fn().mockResolvedValue([]),
     listAgreements: vi.fn().mockResolvedValue([]),
     getMetricsSummary: vi.fn().mockResolvedValue({ methods: [], reduction_rate: null }),
+    getRelayStatus: vi.fn().mockResolvedValue({
+      configured: false,
+      running: true,
+      last_success: null,
+      last_error: null,
+      processed_total: 0,
+    }),
     ...overrides,
   } as unknown as ApiClient;
 }
@@ -39,6 +46,8 @@ describe("appStore", () => {
       approvals: [],
       agreements: [],
       metrics: null,
+      users: [],
+      relayStatus: null,
     });
   });
 
@@ -47,6 +56,7 @@ describe("appStore", () => {
     const state = useAppStore.getState();
     expect(state.health).toEqual(health);
     expect(state.environment).toEqual(environment);
+    expect(state.users).toEqual([]);
     expect(state.error).toBeNull();
     expect(state.loading).toBe(false);
   });

@@ -67,7 +67,7 @@ Three ideas do the heavy lifting:
 
 - **Clone agents.** When you delegate a task, ENISHI spins up a scoped agent (a "clone"). It starts in `review_required` state and cannot perform any high-privilege action until you explicitly activate it. The default profile denies destructive operations outright.
 - **Selective disclosure.** You configure, per peer, what your agent is allowed to reveal. A negotiating agent answers "does this slot work?" without ever transmitting the underlying calendar. Memories marked `secret` never leave the device and are never packed into a clone's context.
-- **Approval gate with expiry.** Before anything is executed, the protocol routes a `REQUEST_APPROVAL` to the human. Approvals carry an `expires_at`; once expired, the action can no longer run, so a stale "yes" from last week can't be replayed into an action today.
+- **Risk-based approval gate with expiry.** Explicitly delegated low-risk negotiations may complete automatically. Destructive, externally visible, low-confidence, or policy-restricted actions stop for human approval. Approvals carry an `expires_at`; once expired, the action can no longer run, so a stale "yes" from last week can't be replayed into an action today.
 
 ## Security design
 
@@ -77,7 +77,7 @@ The threat model assumes the relay is untrusted and the other agent may be adver
 - Bearer token comparison uses constant-time comparison (`secrets.compare_digest`) to avoid timing leaks.
 - The app never builds shell command strings. External CLIs are invoked as a command name plus a validated argument array, never a concatenated string.
 - CLI detection is limited to `shutil.which` plus a `--version` probe. ENISHI never reads another tool's credentials.
-- Secrets go to the macOS Keychain, never to SQLite or JSON on disk.
+- ENISHI does not store external-provider credentials. The node signing key is currently protected as a local `0600` file; moving it to the macOS Keychain is still pending.
 
 More detail is in [`docs/security.md`](docs/security.md).
 

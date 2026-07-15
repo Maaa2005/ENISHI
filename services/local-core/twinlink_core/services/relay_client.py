@@ -62,6 +62,9 @@ class RelayClient:
         except httpx.HTTPError as exc:
             raise _unavailable(exc) from exc
 
+    def close(self) -> None:
+        self._client.close()
+
 
 def get_relay_client() -> RelayClient:
     """設定からRelayクライアントを生成する。未設定はRELAY_UNAVAILABLE。"""

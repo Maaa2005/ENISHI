@@ -13,10 +13,18 @@ from twinlink_core.api.deps import require_local_token
 from twinlink_core.config import get_settings
 from twinlink_core.database import get_session, is_connected
 from twinlink_core.errors import TwinLinkError
-from twinlink_core.models import CloneContextPackage, User
+from twinlink_core.models import (
+    Approval,
+    ApprovalStatus,
+    CloneContextPackage,
+    NegotiationDecision,
+    User,
+)
 from twinlink_core.providers import get_adapter
 from twinlink_core.providers.base import ProviderDetectionResult
 from twinlink_core.schemas import (
+    AgentIdentityRead,
+    AgentRequestCreate,
     AgreementPatch,
     AgreementRead,
     ApprovalRead,
@@ -24,14 +32,18 @@ from twinlink_core.schemas import (
     CloneRead,
     ContextPackageCreate,
     ContextPackageRead,
+    DefaultDisclosurePolicyRead,
     EnvironmentInfo,
     HealthResponse,
     MemoryCreate,
     MemoryRead,
+    MemorySourceSettingRead,
+    MemorySourceSettingsUpdate,
     MetricsExperimentCreate,
     MetricsExperimentRead,
     MetricsSummary,
     NegotiationCreate,
+    NegotiationDecisionRead,
     NegotiationMessageRead,
     NegotiationMetrics,
     NegotiationRead,
@@ -40,6 +52,8 @@ from twinlink_core.schemas import (
     PeerDisclosurePolicyPatch,
     PeerDisclosurePolicyRead,
     PeerRead,
+    PolicyRead,
+    PolicyUpdate,
     ProjectCreate,
     ProjectPatch,
     ProjectRead,
@@ -49,15 +63,24 @@ from twinlink_core.schemas import (
     TaskRead,
     UserCreate,
     UserRead,
+    UserUpdate,
 )
 from twinlink_core.security.keys import ensure_node_keypair
+from twinlink_core.services import agent_requests as agent_request_service
 from twinlink_core.services import approvals as approval_service
-from twinlink_core.services import clone_bootstrap, context_builder, remote_negotiation
+from twinlink_core.services import (
+    clone_bootstrap,
+    context_builder,
+    relay_worker,
+    remote_negotiation,
+)
 from twinlink_core.services import clones as clone_service
 from twinlink_core.services import memories as memory_service
+from twinlink_core.services import memory_source_settings as memory_source_service
 from twinlink_core.services import metrics as metrics_service
 from twinlink_core.services import negotiation as negotiation_service
 from twinlink_core.services import peers as peer_service
+from twinlink_core.services import policies as policy_service
 from twinlink_core.services import projects as project_service
 from twinlink_core.services import tasks as task_service
 from twinlink_core.services.environment import get_environment
@@ -91,10 +114,36 @@ def list_users(session: Session = Depends(get_session)) -> list[User]:
 def create_user(body: UserCreate, session: Session = Depends(get_session)) -> User:
     user = User(
         display_name=body.display_name,
+        nickname=body.nickname,
         timezone=body.timezone,
         language=body.language,
     )
     session.add(user)
+    session.commit()
+    session.refresh(user)
+    agent_request_service.ensure_personal_agent(session, user.id)
+    session.commit()
+    return user
+
+
+@v1_router.put("/users/{user_id}", response_model=UserRead)
+def update_user(
+    user_id: str,
+    body: UserUpdate,
+    session: Session = Depends(get_session),
+) -> User:
+    user = session.get(User, user_id)
+    if user is None:
+        raise TwinLinkError(
+            code="USER_NOT_FOUND",
+            message="ユーザーが見つかりません。",
+            status_code=404,
+            details={"user_id": user_id},
+        )
+    user.display_name = body.display_name
+    user.nickname = body.nickname
+    user.timezone = body.timezone
+    user.language = body.language
     session.commit()
     session.refresh(user)
     return user
@@ -134,6 +183,29 @@ def rebuild_clone(clone_id: str, session: Session = Depends(get_session)) -> Clo
 @v1_router.get("/memories", response_model=list[MemoryRead])
 def list_memories(user_id: str, session: Session = Depends(get_session)) -> list[MemoryRead]:
     return [MemoryRead.model_validate(m) for m in memory_service.list_memories(session, user_id)]
+
+
+@v1_router.get("/memory-sources", response_model=list[MemorySourceSettingRead])
+def list_memory_sources(
+    session: Session = Depends(get_session),
+) -> list[MemorySourceSettingRead]:
+    return [
+        MemorySourceSettingRead.model_validate(source)
+        for source in memory_source_service.list_settings(session)
+    ]
+
+
+@v1_router.put("/memory-sources", response_model=list[MemorySourceSettingRead])
+def put_memory_sources(
+    body: MemorySourceSettingsUpdate,
+    session: Session = Depends(get_session),
+) -> list[MemorySourceSettingRead]:
+    return [
+        MemorySourceSettingRead.model_validate(source)
+        for source in memory_source_service.put_settings(
+            session, [item.model_dump() for item in body.sources]
+        )
+    ]
 
 
 @v1_router.post("/memories", response_model=MemoryRead, status_code=201)
@@ -208,6 +280,20 @@ def list_approvals(
 
 @v1_router.post("/approvals/{approval_id}/approve", response_model=ApprovalRead)
 def approve_approval(approval_id: str, session: Session = Depends(get_session)) -> ApprovalRead:
+    pending = session.get(Approval, approval_id)
+    if (
+        pending is not None
+        and pending.action_type == "negotiation_decision"
+        and pending.payload.get("remote")
+    ):
+        approval = remote_negotiation.resolve_remote_approval(
+            session, approval_id, ApprovalStatus.APPROVED.value
+        )
+        try:
+            remote_negotiation.flush_outbox(session, get_relay_client())
+        except TwinLinkError:
+            pass
+        return ApprovalRead.model_validate(approval)
     approval = approval_service.approve(session, approval_id)
     task_service.on_approval_resolved(session, approval)
     negotiation_service.on_approval_resolved(session, approval)
@@ -216,6 +302,20 @@ def approve_approval(approval_id: str, session: Session = Depends(get_session)) 
 
 @v1_router.post("/approvals/{approval_id}/reject", response_model=ApprovalRead)
 def reject_approval(approval_id: str, session: Session = Depends(get_session)) -> ApprovalRead:
+    pending = session.get(Approval, approval_id)
+    if (
+        pending is not None
+        and pending.action_type == "negotiation_decision"
+        and pending.payload.get("remote")
+    ):
+        approval = remote_negotiation.resolve_remote_approval(
+            session, approval_id, ApprovalStatus.REJECTED.value
+        )
+        try:
+            remote_negotiation.flush_outbox(session, get_relay_client())
+        except TwinLinkError:
+            pass
+        return ApprovalRead.model_validate(approval)
     approval = approval_service.reject(session, approval_id)
     task_service.on_approval_resolved(session, approval)
     negotiation_service.on_approval_resolved(session, approval)
@@ -425,9 +525,36 @@ def start_remote_negotiation(
     return NegotiationRead.model_validate(negotiation)
 
 
+@v1_router.post("/agent/requests", response_model=NegotiationRead, status_code=201)
+def create_agent_request(
+    body: AgentRequestCreate,
+    session: Session = Depends(get_session),
+) -> NegotiationRead:
+    # Relay設定の解決より先に検証し、曖昧入力を必ず422かつ無送信で返す。
+    agent_request_service.interpret_meeting_request(body.text)
+    negotiation = agent_request_service.submit_agent_request(
+        session,
+        get_relay_client(),
+        user_id=body.user_id,
+        text=body.text,
+        peer_agent_id=body.peer_agent_id,
+    )
+    return NegotiationRead.model_validate(negotiation)
+
+
 @v1_router.post("/relay/inbox/process")
 def process_relay_inbox(session: Session = Depends(get_session)) -> dict[str, object]:
-    return dict(remote_negotiation.process_inbox(session, get_relay_client()))
+    return dict(relay_worker.sync_session(session, get_relay_client()))
+
+
+@v1_router.get("/relay/status")
+def relay_status() -> dict[str, object]:
+    return dict(relay_worker.status())
+
+
+@v1_router.post("/relay/sync")
+def sync_relay(session: Session = Depends(get_session)) -> dict[str, object]:
+    return dict(relay_worker.sync_session(session, get_relay_client()))
 
 
 @v1_router.get("/negotiations", response_model=list[NegotiationRead])
@@ -446,6 +573,23 @@ def get_negotiation(session_id: str, session: Session = Depends(get_session)) ->
     return NegotiationRead.model_validate(
         negotiation_service.get_negotiation(session, session_id)
     )
+
+
+@v1_router.get(
+    "/negotiations/{session_id}/decision",
+    response_model=NegotiationDecisionRead | None,
+)
+def get_negotiation_decision(
+    session_id: str,
+    session: Session = Depends(get_session),
+) -> NegotiationDecisionRead | None:
+    negotiation_service.get_negotiation(session, session_id)
+    decision = session.scalars(
+        select(NegotiationDecision)
+        .where(NegotiationDecision.session_id == session_id)
+        .order_by(NegotiationDecision.created_at.desc())
+    ).first()
+    return NegotiationDecisionRead.model_validate(decision) if decision else None
 
 
 @v1_router.get("/negotiations/{session_id}/messages", response_model=list[NegotiationMessageRead])
@@ -526,6 +670,24 @@ def node_identity() -> NodeIdentityRead:
     )
 
 
+@v1_router.get("/agent/identity", response_model=AgentIdentityRead)
+def agent_identity(
+    user_id: str,
+    session: Session = Depends(get_session),
+) -> AgentIdentityRead:
+    personal = agent_request_service.ensure_personal_agent(session, user_id)
+    node = agent_request_service.ensure_device_node(session, personal)
+    session.commit()
+    return AgentIdentityRead(
+        personal_agent_id=personal.id,
+        user_id=personal.user_id,
+        active_clone_id=personal.active_clone_id,
+        node_id=node.node_id,
+        public_key=node.public_key,
+        fingerprint=node.fingerprint,
+    )
+
+
 @v1_router.get("/peers", response_model=list[PeerRead])
 def list_peers(session: Session = Depends(get_session)) -> list[PeerRead]:
     return [PeerRead.model_validate(p) for p in peer_service.list_peers(session)]
@@ -536,8 +698,10 @@ def register_peer(body: PeerCreate, session: Session = Depends(get_session)) -> 
     peer = peer_service.register_peer(
         session,
         agent_id=body.agent_id,
+        personal_agent_id=body.personal_agent_id,
         display_name=body.display_name,
         public_key=body.public_key,
+        aliases=body.aliases,
     )
     return PeerRead.model_validate(peer)
 
@@ -559,6 +723,76 @@ def get_peer_disclosure(
 ) -> PeerDisclosurePolicyRead:
     return PeerDisclosurePolicyRead.model_validate(
         peer_service.get_disclosure_policy(session, agent_id)
+    )
+
+
+@v1_router.get("/disclosure/default", response_model=DefaultDisclosurePolicyRead)
+def get_default_disclosure(
+    session: Session = Depends(get_session),
+) -> DefaultDisclosurePolicyRead:
+    return DefaultDisclosurePolicyRead.model_validate(
+        peer_service.get_default_disclosure_policy(session)
+    )
+
+
+@v1_router.put("/disclosure/default", response_model=DefaultDisclosurePolicyRead)
+def put_default_disclosure(
+    body: PeerDisclosurePolicyPatch,
+    session: Session = Depends(get_session),
+) -> DefaultDisclosurePolicyRead:
+    return DefaultDisclosurePolicyRead.model_validate(
+        peer_service.put_default_disclosure_policy(
+            session,
+            allowed_memory_types=list(body.allowed_memory_types),
+            max_sensitivity=body.max_sensitivity,
+            share_schedule=body.share_schedule,
+            share_skills=body.share_skills,
+            extra=body.extra,
+        )
+    )
+
+
+@v1_router.get("/policies/delegation", response_model=PolicyRead)
+def get_delegation_policy(
+    user_id: str,
+    session: Session = Depends(get_session),
+) -> PolicyRead:
+    return PolicyRead(
+        **policy_service.policy_to_dict(policy_service.get_delegation(session, user_id))
+    )
+
+
+@v1_router.put("/policies/delegation", response_model=PolicyRead)
+def put_delegation_policy(
+    body: PolicyUpdate,
+    session: Session = Depends(get_session),
+) -> PolicyRead:
+    return PolicyRead(
+        **policy_service.policy_to_dict(
+            policy_service.put_delegation(session, body.user_id, body.rules)
+        )
+    )
+
+
+@v1_router.get("/policies/approval-rules", response_model=PolicyRead)
+def get_approval_rules_policy(
+    user_id: str,
+    session: Session = Depends(get_session),
+) -> PolicyRead:
+    return PolicyRead(
+        **policy_service.policy_to_dict(policy_service.get_approval_rules(session, user_id))
+    )
+
+
+@v1_router.put("/policies/approval-rules", response_model=PolicyRead)
+def put_approval_rules_policy(
+    body: PolicyUpdate,
+    session: Session = Depends(get_session),
+) -> PolicyRead:
+    return PolicyRead(
+        **policy_service.policy_to_dict(
+            policy_service.put_approval_rules(session, body.user_id, body.rules)
+        )
     )
 
 

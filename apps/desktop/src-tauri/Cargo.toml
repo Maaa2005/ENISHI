@@ -2,7 +2,7 @@
 name = "twinlink-desktop"
 version = "0.1.0"
 edition = "2021"
-description = "TwinLink Desktop for macOS"
+description = "ENISHI - personal AI agent coordination platform for macOS"
 
 [lib]
 name = "twinlink_desktop_lib"

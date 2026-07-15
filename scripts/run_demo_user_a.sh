@@ -16,6 +16,6 @@ export TWINLINK_RELAY_URL="${TWINLINK_RELAY_URL:-http://127.0.0.1:8870}"
 export TWINLINK_RELAY_TOKEN="${TWINLINK_RELAY_TOKEN:-relay-token-a}"
 PORT="${TWINLINK_LOCAL_PORT:-8871}"
 
-echo "TwinLink Demo User A: http://127.0.0.1:${PORT} (token: ${TWINLINK_LOCAL_TOKEN})"
+echo "ENISHI Demo User A: http://127.0.0.1:${PORT} (token: ${TWINLINK_LOCAL_TOKEN})"
 echo "data: ${DATA_DIR}"
 exec uv run uvicorn twinlink_core.main:app --host 127.0.0.1 --port "$PORT"

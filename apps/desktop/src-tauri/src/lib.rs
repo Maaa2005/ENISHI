@@ -23,7 +23,7 @@ pub fn run() {
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![commands::get_core_connection])
         .build(tauri::generate_context!())
-        .expect("error while building TwinLink Desktop")
+        .expect("error while building ENISHI")
         .run(|app_handle, event| {
             // アプリ終了時にLocal Coreも終了させ、孤立プロセスを残さない（twinlink.md §10）
             if let tauri::RunEvent::Exit = event {

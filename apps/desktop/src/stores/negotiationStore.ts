@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { ApiClient } from "../services/api";
 import type {
   AnyNegotiationCreateParams,
+  NegotiationDecisionRead,
   NegotiationMessageRead,
   NegotiationMetrics,
   NegotiationRead,
@@ -12,6 +13,7 @@ export interface NegotiationState {
   selectedSessionId: string | null;
   messages: NegotiationMessageRead[];
   metrics: NegotiationMetrics | null;
+  decision: NegotiationDecisionRead | null;
   loading: boolean;
   error: string | null;
   loadSessions: (client: ApiClient) => Promise<void>;
@@ -28,6 +30,7 @@ export const useNegotiationStore = create<NegotiationState>((set, get) => ({
   selectedSessionId: null,
   messages: [],
   metrics: null,
+  decision: null,
   loading: false,
   error: null,
 
@@ -42,13 +45,16 @@ export const useNegotiationStore = create<NegotiationState>((set, get) => ({
   },
 
   select: async (client: ApiClient, sessionId: string) => {
-    set({ loading: true, error: null, selectedSessionId: sessionId });
+    set({ loading: true, error: null, selectedSessionId: sessionId, messages: [], metrics: null, decision: null });
     try {
-      const messages = await client.listNegotiationMessages(sessionId);
-      const metrics = await client.getNegotiationMetrics(sessionId);
-      set({ messages, metrics, loading: false });
+      const [messages, metrics, decision] = await Promise.all([
+        client.listNegotiationMessages(sessionId),
+        client.getNegotiationMetrics(sessionId),
+        client.getNegotiationDecision(sessionId),
+      ]);
+      set({ messages, metrics, decision, loading: false });
     } catch (error) {
-      set({ loading: false, messages: [], metrics: null, error: toErrorMessage(error) });
+      set({ loading: false, messages: [], metrics: null, decision: null, error: toErrorMessage(error) });
     }
   },
 

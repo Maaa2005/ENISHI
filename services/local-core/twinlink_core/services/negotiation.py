@@ -29,6 +29,7 @@ from twinlink_core.models.base import utc_now
 from twinlink_core.services import approvals as approval_service
 from twinlink_core.services.audit import log_event
 from twinlink_core.services.memories import exportable_memories
+from twinlink_core.services.policies import delegation_enabled
 from twinlink_core.services.scheduling import (
     Slot,
     candidate_slots,
@@ -382,6 +383,35 @@ def run_task_request_negotiation(
         "estimated_hours": estimated_hours,
         "conditions": conditions or {},
     }
+    if not delegation_enabled(session_db, responder.user_id, "task_negotiation", default=True):
+        negotiation = NegotiationSession(
+            initiator_clone_id=initiator.id,
+            responder_clone_id=responder.id,
+            intent=INTENT_TASK_REQUEST,
+            topic=title,
+        )
+        session_db.add(negotiation)
+        session_db.flush()
+        session_db.add(
+            NegotiationMessage(
+                session_id=negotiation.id,
+                sequence=1,
+                sender_agent_id=initiator.id,
+                receiver_agent_id=responder.id,
+                message_type=MessageType.REQUEST.value,
+                intent=INTENT_TASK_REQUEST,
+                payload=task_payload,
+                delta={},
+            )
+        )
+        _create_negotiation_approval(
+            session_db,
+            responder,
+            negotiation,
+            task_payload,
+            reason="task_negotiation_not_delegated",
+        )
+        return negotiation
     negotiation = NegotiationSession(
         initiator_clone_id=initiator.id,
         responder_clone_id=responder.id,
@@ -433,10 +463,12 @@ def run_task_request_negotiation(
         return negotiation
 
     if hours <= max_counter:
-        counter = dict(task_payload)
+        counter: dict[str, Any] = dict(task_payload)
         if hours > max_accept:
             counter["estimated_hours"] = max_accept
-            counter.setdefault("conditions", {})["scope"] = "reduce_to_auto_accept_hours"
+            counter_conditions = counter.setdefault("conditions", {})
+            if isinstance(counter_conditions, dict):
+                counter_conditions["scope"] = "reduce_to_auto_accept_hours"
         counter["deadline"] = _counter_deadline(deadline, min_days)
         message = NegotiationMessage(
             session_id=negotiation.id,

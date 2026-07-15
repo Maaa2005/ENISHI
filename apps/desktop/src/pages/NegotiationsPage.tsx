@@ -1,249 +1,99 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import type { ApiClient } from "../services/api";
 import { useNegotiationStore } from "../stores/negotiationStore";
-import type { NegotiationMessageRead, NegotiationMetrics } from "../types";
-
-const sectionStyle: React.CSSProperties = {
-  border: "1px solid #ddd",
-  borderRadius: 8,
-  padding: "1rem",
-};
+import { useAppStore } from "../stores/appStore";
+import type { NegotiationDecisionRead, NegotiationMessageRead, NegotiationMetrics, NegotiationRead } from "../types";
 
 function statusLabel(status: string): string {
-  if (status === "agreed") return "合意";
+  if (status === "agreed") return "合意済み";
   if (status === "failed") return "不成立";
-  if (status === "waiting_approval") return "承認待ち";
-  return "進行中";
+  if (status === "waiting_approval") return "判断待ち";
+  return "交渉中";
 }
 
-function MessageCard({ message }: { message: NegotiationMessageRead }) {
+function intentLabel(intent: string): string {
+  if (intent === "meeting.schedule") return "日程調整";
+  if (intent === "task.request") return "仕事の依頼";
+  return intent;
+}
+
+function formatDate(value: string): string {
+  return new Intl.DateTimeFormat("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+}
+
+function messageLabel(type: string): string {
+  const labels: Record<string, string> = { REQUEST: "依頼", PROPOSE: "提案", COUNTER: "代案", ACCEPT: "合意", REJECT: "拒否", REQUEST_APPROVAL: "人間へ判断を依頼", APPROVAL_RESULT: "判断結果", EXECUTE: "実行", RECEIPT: "完了" };
+  return labels[type] ?? type;
+}
+
+const reasonLabels: Record<string, string> = {
+  schedule_negotiation_not_delegated: "日程交渉が委任範囲外",
+  clone_confidence_below_threshold: "判断の確信度が基準未満",
+  meeting_auto_accept_disabled: "自動承認が無効",
+  meeting_outside_preferred_time: "希望時間帯から外れている",
+  meeting_time_avoided: "避けたい時間帯に含まれている",
+  relationship_requires_approval: "この相手には本人確認が必要",
+  common_slot_within_delegation: "委任範囲内の共通候補",
+  no_common_slot: "共通候補なし",
+};
+
+function MessageBody({ message }: { message: NegotiationMessageRead }) {
   const body = Object.keys(message.delta).length > 0 ? message.delta : message.payload;
+  if (message.message_type !== "REQUEST_APPROVAL") return <pre>{JSON.stringify(body, null, 2)}</pre>;
+  const reasons = Array.isArray(body.reason_codes) ? body.reason_codes.filter((item): item is string => typeof item === "string") : [];
+  const confidence = typeof body.confidence === "number" ? Math.round(body.confidence * 100) : null;
+  return <div className="decision-explanation"><p><strong>本人確認の理由:</strong> {reasons.map((reason) => reasonLabels[reason] ?? reason).join("、")}</p><p><strong>代理AIの確信度:</strong> {confidence === null ? "—" : `${confidence}%`}</p></div>;
+}
+
+function MessageCard({ message, ownAgentIds }: { message: NegotiationMessageRead; ownAgentIds: Set<string> }) {
+  const outgoing = ownAgentIds.has(message.sender_agent_id);
   return (
-    <li style={{ marginBottom: "0.75rem", listStyle: "none" }}>
-      <div style={{ fontWeight: 600 }}>
-        {message.message_type}{" "}
-        <span style={{ fontWeight: 400, color: "#555" }}>
-          {message.sender_agent_id} → {message.receiver_agent_id}
-          {message.requires_human_approval ? "（要承認）" : "（承認不要）"}
-        </span>
+    <li className={`log-entry ${outgoing ? "outgoing" : "incoming"}`}>
+      <div className="log-marker" />
+      <div className="log-card">
+        <div className="log-meta"><strong>{outgoing ? "あなたの代理AI" : "相手の代理AI"}</strong><span>{formatDate(message.created_at)}</span></div>
+        <div className="log-action"><span className="pill">{messageLabel(message.message_type)}</span>{message.requires_human_approval && <span className="pill attention">判断が必要</span>}</div>
+        <MessageBody message={message} />
       </div>
-      <pre
-        style={{
-          background: "#f6f6f6",
-          padding: "0.5rem",
-          borderRadius: 4,
-          overflowX: "auto",
-          margin: "0.25rem 0 0",
-        }}
-      >
-        {JSON.stringify(body, null, 2)}
-      </pre>
     </li>
   );
 }
 
-function MetricsPanel({ metrics }: { metrics: NegotiationMetrics }) {
-  const rows = [metrics.structured, metrics.email];
+function DecisionSummary({ session, messages, decision, onOpenApprovals }: { session: NegotiationRead; messages: NegotiationMessageRead[]; decision: NegotiationDecisionRead | null; onOpenApprovals: () => void }) {
+  const last = messages.at(-1);
   return (
-    <div style={sectionStyle}>
-      <h3 style={{ marginTop: 0 }}>トークン比較（実測値）</h3>
-      <table style={{ borderCollapse: "collapse", width: "100%" }}>
-        <thead>
-          <tr>
-            {["方式", "合計トークン", "LLM呼び出し", "メッセージ数"].map((h) => (
-              <th key={h} style={{ textAlign: "left", padding: "0.25rem 0.5rem" }}>
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.method}>
-              <td style={{ padding: "0.25rem 0.5rem" }}>{row.method}</td>
-              <td style={{ padding: "0.25rem 0.5rem" }}>{row.total_tokens}</td>
-              <td style={{ padding: "0.25rem 0.5rem" }}>{row.llm_calls}</td>
-              <td style={{ padding: "0.25rem 0.5rem" }}>{row.message_count}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p style={{ marginBottom: 0 }}>
-        削減率:{" "}
-        {metrics.reduction_rate === null ? "計測不能" : `${metrics.reduction_rate.toFixed(1)}%`}
-      </p>
-    </div>
+    <section className={`decision-card ${session.pending_approval_id ? "needs-decision" : ""}`}>
+      <div><p className="eyebrow">CURRENT POSITION</p><h2>{session.pending_approval_id ? "あなたの判断を待っています" : statusLabel(session.status)}</h2><p>{session.pending_approval_id ? "AI同士の交渉が一区切りつきました。条件と交渉ログを確認して決定してください。" : "AI同士が条件を調整しています。必要なときだけ承認を求めます。"}</p></div>
+      {session.pending_approval_id && <button className="primary-button" onClick={onOpenApprovals}>条件を確認して判断する</button>}
+      {decision && <div className="decision-explanation"><p><strong>代理AIの判断:</strong> {decision.reason_codes.map((reason) => reasonLabels[reason] ?? reason).join("、")}</p><p><strong>判断の確信度:</strong> {Math.round(decision.confidence * 100)}%</p></div>}
+      <dl className="decision-facts"><div><dt>交渉内容</dt><dd>{session.topic}</dd></div><div><dt>種類</dt><dd>{intentLabel(session.intent)}</dd></div><div><dt>現在の段階</dt><dd>{last ? messageLabel(last.message_type) : "開始待ち"}</dd></div><div><dt>更新</dt><dd>{formatDate(session.updated_at)}</dd></div></dl>
+    </section>
   );
 }
 
-export function NegotiationsPage({ client }: { client: ApiClient | null }) {
-  const { sessions, selectedSessionId, messages, metrics, loading, error, loadSessions, select, run } =
-    useNegotiationStore();
+function MetricsPanel({ metrics }: { metrics: NegotiationMetrics }) {
+  return <section className="negotiation-metrics"><span>交渉効率</span><strong>{metrics.reduction_rate === null ? "—" : `${metrics.reduction_rate.toFixed(0)}%`}</strong><small>通常のメール調整より少ないトークン</small></section>;
+}
 
-  useEffect(() => {
-    if (client) void loadSessions(client);
-  }, [client, loadSessions]);
+export function NegotiationsPage({ client, onOpenApprovals }: { client: ApiClient | null; onOpenApprovals: () => void }) {
+  const { sessions, selectedSessionId, messages, metrics, decision, loading, error, loadSessions, select } = useNegotiationStore();
+  const clones = useAppStore((state) => state.clones);
+  const ownAgentIds = new Set(clones.map((clone) => clone.id));
+  const selected = sessions.find((session) => session.id === selectedSessionId) ?? null;
+  const waitingCount = sessions.filter((session) => session.pending_approval_id).length;
 
-  const [initiatorUserId, setInitiatorUserId] = useState("");
-  const [responderUserId, setResponderUserId] = useState("");
-  const [topic, setTopic] = useState("打ち合わせ");
-  const [duration, setDuration] = useState(30);
-  const [dateStart, setDateStart] = useState("");
-  const [dateEnd, setDateEnd] = useState("");
-  const [timeStart, setTimeStart] = useState("13:00");
-  const [timeEnd, setTimeEnd] = useState("18:00");
-  const [intent, setIntent] = useState<"meeting.schedule" | "task.request">("meeting.schedule");
-  const [taskTitle, setTaskTitle] = useState("資料作成");
-  const [taskDescription, setTaskDescription] = useState("提案資料を作る");
-  const [taskDeadline, setTaskDeadline] = useState("");
-  const [taskHours, setTaskHours] = useState(1.5);
-
-  const canRun =
-    client !== null &&
-    initiatorUserId !== "" &&
-    responderUserId !== "" &&
-    (intent === "task.request" ? taskTitle !== "" : topic !== "" && dateStart !== "" && dateEnd !== "");
-
-  const handleRun = () => {
-    if (!client || !canRun) return;
-    if (intent === "task.request") {
-      void run(client, {
-        intent,
-        initiator_user_id: initiatorUserId,
-        responder_user_id: responderUserId,
-        title: taskTitle,
-        description: taskDescription,
-        deadline: taskDeadline || null,
-        estimated_hours: taskHours,
-        conditions: {},
-      });
-    } else {
-      void run(client, {
-        intent,
-        initiator_user_id: initiatorUserId,
-        responder_user_id: responderUserId,
-        topic,
-        duration_minutes: duration,
-        date_range: { start: dateStart, end: dateEnd },
-        preferred_time_ranges: [{ start: timeStart, end: timeEnd }],
-      });
-    }
-  };
-
-  const filteredSessions = sessions.filter((session) => session.intent === intent);
+  useEffect(() => { if (client) void loadSessions(client); }, [client, loadSessions]);
+  useEffect(() => { if (client && sessions.length > 0 && !selectedSessionId) { const priority = sessions.find((item) => item.pending_approval_id) ?? sessions[0]; void select(client, priority.id); } }, [client, sessions, selectedSessionId, select]);
 
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem", maxWidth: 960 }}>
-      <h1>交渉</h1>
-      {error && (
-        <p role="alert" style={{ color: "#c0392b" }}>
-          {error}
-        </p>
-      )}
-
-      <section style={{ ...sectionStyle, marginBottom: "1rem" }}>
-        <h3 style={{ marginTop: 0 }}>新規交渉</h3>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-          <select value={intent} onChange={(e) => setIntent(e.target.value as typeof intent)}>
-            <option value="meeting.schedule">meeting.schedule</option>
-            <option value="task.request">task.request</option>
-          </select>
-          <input
-            placeholder="依頼側ユーザーID"
-            value={initiatorUserId}
-            onChange={(e) => setInitiatorUserId(e.target.value)}
-          />
-          <input
-            placeholder="相手側ユーザーID"
-            value={responderUserId}
-            onChange={(e) => setResponderUserId(e.target.value)}
-          />
-          {intent === "meeting.schedule" ? (
-            <>
-              <input placeholder="トピック" value={topic} onChange={(e) => setTopic(e.target.value)} />
-              <input
-                type="number"
-                min={1}
-                max={480}
-                value={duration}
-                onChange={(e) => setDuration(Number(e.target.value))}
-                style={{ width: 80 }}
-              />
-              <input type="date" value={dateStart} onChange={(e) => setDateStart(e.target.value)} />
-              <input type="date" value={dateEnd} onChange={(e) => setDateEnd(e.target.value)} />
-              <input type="time" value={timeStart} onChange={(e) => setTimeStart(e.target.value)} />
-              <input type="time" value={timeEnd} onChange={(e) => setTimeEnd(e.target.value)} />
-            </>
-          ) : (
-            <>
-              <input
-                placeholder="タイトル"
-                value={taskTitle}
-                onChange={(e) => setTaskTitle(e.target.value)}
-              />
-              <input
-                placeholder="説明"
-                value={taskDescription}
-                onChange={(e) => setTaskDescription(e.target.value)}
-              />
-              <input type="date" value={taskDeadline} onChange={(e) => setTaskDeadline(e.target.value)} />
-              <input
-                type="number"
-                min={0}
-                step={0.5}
-                value={taskHours}
-                onChange={(e) => setTaskHours(Number(e.target.value))}
-                style={{ width: 90 }}
-              />
-            </>
-          )}
-          <button onClick={handleRun} disabled={!canRun || loading}>
-            {loading ? "実行中…" : "実行"}
-          </button>
-        </div>
-      </section>
-
-      <div style={{ display: "flex", gap: "1rem", alignItems: "flex-start" }}>
-        <section style={{ ...sectionStyle, width: 280, flexShrink: 0 }}>
-          <h3 style={{ marginTop: 0 }}>セッション一覧</h3>
-          {filteredSessions.length === 0 && <p>交渉履歴がありません</p>}
-          <ul style={{ margin: 0, padding: 0 }}>
-            {filteredSessions.map((session) => (
-              <li key={session.id} style={{ listStyle: "none", marginBottom: "0.5rem" }}>
-                <button
-                  onClick={() => client && void select(client, session.id)}
-                  style={{
-                    width: "100%",
-                    textAlign: "left",
-                    padding: "0.5rem",
-                    background: session.id === selectedSessionId ? "#eef" : "#fff",
-                    border: "1px solid #ccc",
-                    borderRadius: 4,
-                    cursor: "pointer",
-                  }}
-                >
-                  <div style={{ fontWeight: 600 }}>{session.topic}</div>
-                  <div style={{ fontSize: "0.85rem", color: "#555" }}>
-                    {session.intent} / {statusLabel(session.status)} / {session.created_at}
-                    {session.pending_approval_id ? ` / approval ${session.pending_approval_id}` : ""}
-                  </div>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <div style={{ flexGrow: 1, display: "flex", flexDirection: "column", gap: "1rem" }}>
-          <section style={sectionStyle}>
-            <h3 style={{ marginTop: 0 }}>タイムライン</h3>
-            {messages.length === 0 && <p>セッションを選択してください</p>}
-            <ol style={{ margin: 0, padding: 0 }}>
-              {messages.map((message) => (
-                <MessageCard key={message.message_id} message={message} />
-              ))}
-            </ol>
-          </section>
-          {metrics && <MetricsPanel metrics={metrics} />}
+    <main className="page negotiations-page">
+      <header className="page-header"><div><p className="eyebrow">AI NEGOTIATIONS</p><h1>交渉</h1><p className="subtitle">AI同士の交渉状況を把握し、最終的な決定を行います。</p></div><div className={`decision-count ${waitingCount ? "active" : ""}`}><strong>{waitingCount}</strong><span>判断待ち</span></div></header>
+      {error && <p role="alert" className="alert error">{error}</p>}
+      <div className="negotiation-layout">
+        <aside className="session-panel"><div className="session-panel-header"><h2>交渉一覧</h2><span>{sessions.length}件</span></div>{sessions.length === 0 && <div className="compact-empty">交渉履歴はありません</div>}<ul>{sessions.map((session) => <li key={session.id}><button onClick={() => client && void select(client, session.id)} className={`session-item ${session.id === selectedSessionId ? "selected" : ""}`}><div className="session-title"><span className={`session-status ${session.pending_approval_id ? "waiting" : session.status}`} /> <strong>{session.topic}</strong></div><p>{intentLabel(session.intent)} · {statusLabel(session.status)}</p><time>{formatDate(session.updated_at)}</time>{session.pending_approval_id && <span className="session-attention">要判断</span>}</button></li>)}</ul></aside>
+        <div className="negotiation-detail">
+          {!selected && <section className="empty-state"><div className="empty-icon">⇄</div><h2>{loading ? "読み込み中…" : "交渉を選択"}</h2><p>左の一覧から確認したい交渉を選んでください。</p></section>}
+          {selected && <><DecisionSummary session={selected} messages={messages} decision={decision} onOpenApprovals={onOpenApprovals} /><section className="log-panel"><div className="log-panel-header"><div><h2>交渉ログ</h2><p>双方の代理AIが、何を提案しどう判断したかを時系列で表示します。</p></div><span>{messages.length}件</span></div>{loading ? <div className="compact-empty">ログを読み込んでいます…</div> : messages.length === 0 ? <div className="compact-empty">ログはまだありません</div> : <ol className="log-timeline">{messages.map((message) => <MessageCard key={message.message_id} message={message} ownAgentIds={ownAgentIds} />)}</ol>}</section>{metrics && <MetricsPanel metrics={metrics} />}</>}
         </div>
       </div>
     </main>

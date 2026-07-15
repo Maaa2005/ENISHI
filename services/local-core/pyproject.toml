@@ -1,7 +1,7 @@
 [project]
 name = "twinlink-core"
 version = "0.1.0"
-description = "TwinLink Local Core - 本人代理型AIエージェントのローカルバックエンド"
+description = "ENISHI Local Core - 本人代理AIエージェント間の交渉・日程調整・協調を担うローカルバックエンド"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

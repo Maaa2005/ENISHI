@@ -33,9 +33,18 @@ export interface NodeIdentityRead {
 export interface UserRead {
   id: string;
   display_name: string;
+  nickname: string | null;
   timezone: string;
   language: string;
   created_at: string;
+  updated_at: string;
+}
+
+export interface UserUpdateParams {
+  display_name: string;
+  nickname: string | null;
+  timezone: string;
+  language: string;
 }
 
 export interface CloneRead {
@@ -54,6 +63,8 @@ export interface NegotiationRead {
   id: string;
   initiator_clone_id: string;
   responder_clone_id: string;
+  initiator_agent_id: string | null;
+  responder_agent_id: string | null;
   intent: string;
   topic: string;
   status: string;
@@ -62,6 +73,12 @@ export interface NegotiationRead {
   pending_approval_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface AgentRequestCreateParams {
+  user_id: string;
+  text: string;
+  peer_agent_id?: string;
 }
 
 export interface NegotiationMessageRead {
@@ -111,6 +128,15 @@ export interface NegotiationMetrics {
   reduction_rate: number | null;
 }
 
+export interface NegotiationDecisionRead {
+  policy_version: number;
+  outcome: string;
+  reason_codes: string[];
+  evidence: Record<string, unknown>;
+  confidence: number;
+  created_at: string;
+}
+
 export interface NegotiationCreateParams {
   intent?: "meeting.schedule";
   initiator_user_id: string;
@@ -136,7 +162,9 @@ export type AnyNegotiationCreateParams = NegotiationCreateParams | TaskNegotiati
 
 export interface PeerRead {
   agent_id: string;
+  personal_agent_id: string | null;
   display_name: string;
+  aliases: string[];
   public_key: string;
   fingerprint: string;
   status: "pending" | "trusted" | "blocked" | string;
@@ -146,8 +174,27 @@ export interface PeerRead {
 
 export interface PeerCreateParams {
   agent_id: string;
+  personal_agent_id?: string;
   display_name: string;
+  aliases?: string[];
   public_key: string;
+}
+
+export interface AgentIdentityRead {
+  personal_agent_id: string;
+  user_id: string;
+  active_clone_id: string | null;
+  node_id: string;
+  public_key: string;
+  fingerprint: string;
+}
+
+export interface RelayStatusRead {
+  configured: boolean;
+  running: boolean;
+  last_success: string | null;
+  last_error: string | null;
+  processed_total: number;
 }
 
 export interface PeerDisclosurePolicyRead {
@@ -159,6 +206,49 @@ export interface PeerDisclosurePolicyRead {
   extra: Record<string, unknown>;
   created_at: string | null;
   updated_at: string | null;
+}
+
+export interface DefaultDisclosurePolicyRead {
+  allowed_memory_types: string[];
+  max_sensitivity: string;
+  share_schedule: boolean;
+  share_skills: boolean;
+  extra: Record<string, unknown>;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface MemorySourceSettingRead {
+  source: string;
+  connected: boolean;
+  enabled: boolean;
+  scope: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemorySourceSettingPatch {
+  source: string;
+  enabled: boolean;
+  scope: string;
+}
+
+export interface PolicyRead {
+  user_id: string;
+  name: string;
+  rules: Record<string, boolean>;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProviderStatusDetail {
+  provider: string;
+  installed: boolean;
+  path: string | null;
+  version: string | null;
+  authenticated: boolean | null;
+  can_execute: boolean;
 }
 
 export interface AgreementRead {

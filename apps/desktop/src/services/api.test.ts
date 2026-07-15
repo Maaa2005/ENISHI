@@ -103,6 +103,52 @@ describe("ApiClient", () => {
     });
   });
 
+  it("updateUserはプロフィールをPUTする", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ id: "u1" }));
+    const client = new ApiClient(connection, fetchFn);
+
+    await client.updateUser("u1", {
+      display_name: "中村雅志",
+      nickname: "まさし",
+      timezone: "Asia/Tokyo",
+      language: "ja",
+    });
+
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe("http://127.0.0.1:12345/v1/users/u1");
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body as string)).toEqual({
+      display_name: "中村雅志",
+      nickname: "まさし",
+      timezone: "Asia/Tokyo",
+      language: "ja",
+    });
+  });
+
+  it("代理AI設定APIを既定パスへ送る", async () => {
+    const fetchFn = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ rules: {} })));
+    const client = new ApiClient(connection, fetchFn);
+
+    await client.putMemorySources([{ source: "github", enabled: true, scope: "repo" }]);
+    await client.putDefaultDisclosure({
+      allowed_memory_types: ["preference"],
+      max_sensitivity: "internal",
+      share_schedule: true,
+      share_skills: false,
+      extra: {},
+    });
+    await client.putDelegationPolicy("u1", { coding_task: false });
+    await client.putApprovalRulesPolicy("u1", { file_delete: true });
+
+    expect(fetchFn.mock.calls[0][0]).toBe("http://127.0.0.1:12345/v1/memory-sources");
+    expect(JSON.parse(fetchFn.mock.calls[0][1].body as string)).toEqual({
+      sources: [{ source: "github", enabled: true, scope: "repo" }],
+    });
+    expect(fetchFn.mock.calls[1][0]).toBe("http://127.0.0.1:12345/v1/disclosure/default");
+    expect(fetchFn.mock.calls[2][0]).toBe("http://127.0.0.1:12345/v1/policies/delegation");
+    expect(fetchFn.mock.calls[3][0]).toBe("http://127.0.0.1:12345/v1/policies/approval-rules");
+  });
+
   it("runMetricsExperimentは条件をPOSTする", async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ id: "experiment_1" }));
     const client = new ApiClient(connection, fetchFn);

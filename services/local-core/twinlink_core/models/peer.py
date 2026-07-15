@@ -24,8 +24,14 @@ class PeerAgent(Base):
 
     agent_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     display_name: Mapped[str] = mapped_column(String(200))
+    aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
     public_key: Mapped[str] = mapped_column(String(200))
     fingerprint: Mapped[str] = mapped_column(String(64))
+    # 既存agent_idは端末ノードIDとして維持する。未設定の旧行は
+    # personal_agent_id == agent_id とみなして後方互換を保つ。
+    personal_agent_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
     status: Mapped[str] = mapped_column(String(16), default=PeerStatus.PENDING.value, index=True)
 
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
@@ -46,5 +52,20 @@ class PeerDisclosurePolicy(Base):
     share_skills: Mapped[bool] = mapped_column(Boolean, default=False)
     extra: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
+
+
+class DefaultDisclosurePolicy(Base):
+    """相手別ポリシー未設定時の既定公開設定。"""
+
+    __tablename__ = "default_disclosure_policy"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default="default")
+    allowed_memory_types: Mapped[list[str]] = mapped_column(JSON, default=list)
+    max_sensitivity: Mapped[str] = mapped_column(String(16), default="internal")
+    share_schedule: Mapped[bool] = mapped_column(Boolean, default=True)
+    share_skills: Mapped[bool] = mapped_column(Boolean, default=False)
+    extra: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)

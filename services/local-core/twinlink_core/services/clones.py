@@ -119,6 +119,14 @@ def activate_clone(session: Session, clone_id: str) -> CloneAgent:
         )
     clone.status = CloneStatus.ACTIVE.value
     clone.activated_at = utc_now()
+    # PersonalAgentが既に作成済みなら、委任先クローンを同時に切り替える。
+    from twinlink_core.models import PersonalAgent
+
+    personal = session.scalars(
+        select(PersonalAgent).where(PersonalAgent.user_id == clone.user_id)
+    ).first()
+    if personal is not None:
+        personal.active_clone_id = clone.id
     session.commit()
     session.refresh(clone)
     return clone

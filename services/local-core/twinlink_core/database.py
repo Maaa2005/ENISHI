@@ -16,7 +16,7 @@ from twinlink_core.models import Base
 
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
-_BASELINE_REVISION = "202607120002"
+_BASELINE_REVISION = "202607130003"
 
 
 def _is_memory_database(url: str) -> bool:

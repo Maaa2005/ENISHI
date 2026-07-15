@@ -1,3 +1,4 @@
+import json
 import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -44,6 +45,40 @@ def _signed_envelope(tmp_path: Path) -> tuple[dict[str, object], str]:
 def test_envelope_sign_and_verify(tmp_path: Path) -> None:
     envelope, public_key = _signed_envelope(tmp_path)
     verify_envelope(envelope, public_key)  # 例外が出なければ成功
+
+
+def test_generated_envelope_matches_wire_schema_fields(tmp_path: Path) -> None:
+    envelope, _public_key = _signed_envelope(tmp_path)
+    schema_path = (
+        Path(__file__).parents[3]
+        / "packages"
+        / "protocol"
+        / "schemas"
+        / "negotiation-message.schema.json"
+    )
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    assert set(envelope) <= set(schema["properties"])
+    assert set(schema["required"]) <= set(envelope)
+
+
+def test_envelope_schema_rejects_wrong_sequence_type(tmp_path: Path) -> None:
+    identity, private_key = ensure_node_keypair(tmp_path)
+    envelope = build_envelope(
+        sender=identity.agent_id,
+        receiver="agt_peer",
+        session_id="s001",
+        message_type="PROPOSE",
+        intent="meeting.schedule",
+        session_version=1,
+        sequence="2",  # type: ignore[arg-type]
+        payload={},
+        delta={"candidate_slots": []},
+        requires_human_approval=False,
+        private_key=private_key,
+    )
+    with pytest.raises(TwinLinkError) as exc:
+        verify_envelope(envelope, identity.public_key_b64)
+    assert exc.value.code == "MESSAGE_SCHEMA_INVALID"
 
 
 def test_envelope_payload_tamper_rejected(tmp_path: Path) -> None:

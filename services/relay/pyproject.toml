@@ -1,7 +1,7 @@
 [project]
 name = "twinlink-relay"
 version = "0.1.0"
-description = "TwinLink Relay Server - エージェント間メッセージの配送のみを担う"
+description = "ENISHI Relay Server - AUN Protocolによるエージェント間メッセージの配送のみを担う"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

@@ -58,6 +58,19 @@ def test_put_fetch_ack_flow(
     assert client.get("/v1/messages", headers=headers_b).json() == []
 
 
+def test_personal_agent_message_is_routed_by_device_node(
+    client: TestClient, headers_a: dict[str, str], headers_b: dict[str, str]
+) -> None:
+    envelope = _envelope(sender="pa_alice", receiver="pa_bob")
+    envelope["sender_node_id"] = AGENT_A
+    envelope["receiver_node_id"] = AGENT_B
+    posted = client.post("/v1/messages", json=envelope, headers=headers_a)
+    assert posted.status_code == 201
+    fetched = client.get("/v1/messages", headers=headers_b).json()
+    assert fetched[0]["envelope"]["sender_agent_id"] == "pa_alice"
+    assert fetched[0]["envelope"]["receiver_agent_id"] == "pa_bob"
+
+
 def test_redelivery_until_ack(
     client: TestClient, headers_a: dict[str, str], headers_b: dict[str, str]
 ) -> None:

@@ -66,6 +66,7 @@ function makeClient(overrides: Partial<Record<keyof ApiClient, unknown>> = {}): 
     createNegotiation: vi.fn().mockResolvedValue(session),
     listNegotiationMessages: vi.fn().mockResolvedValue([message]),
     getNegotiationMetrics: vi.fn().mockResolvedValue(metrics),
+    getNegotiationDecision: vi.fn().mockResolvedValue(null),
     ...overrides,
   } as unknown as ApiClient;
 }
@@ -77,6 +78,7 @@ describe("negotiationStore", () => {
       selectedSessionId: null,
       messages: [],
       metrics: null,
+      decision: null,
       loading: false,
       error: null,
     });

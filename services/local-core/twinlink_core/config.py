@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     # Relay Server接続設定（twinlink.md §25, §26）。空ならRelay機能は無効
     relay_url: str = ""
     relay_token: str = ""
+    relay_poll_interval_seconds: float = 2.0
+    relay_poll_backoff_max_seconds: float = 60.0
 
     approval_ttl_seconds: int = 3600
     task_timeout_seconds: int = 600

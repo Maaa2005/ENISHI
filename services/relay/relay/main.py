@@ -57,7 +57,7 @@ def create_app(store: MailboxStore | None = None) -> FastAPI:
         rate_limit_per_minute=settings.rate_limit_per_minute,
     )
 
-    app = FastAPI(title="TwinLink Relay", version=__version__)
+    app = FastAPI(title="ENISHI Relay", version=__version__)
     app.state.store = mailbox
 
     @app.exception_handler(RelayError)
@@ -79,22 +79,26 @@ def create_app(store: MailboxStore | None = None) -> FastAPI:
         agent_id: str = Depends(require_agent),
     ) -> dict[str, str]:
         current = get_relay_settings()
-        sender = str(envelope.get("sender_agent_id", ""))
-        receiver = str(envelope.get("receiver_agent_id", ""))
+        # Relayは本人エージェントIDではなく、認証済み端末ノードを配送主体にする。
+        # 旧エンベロープはagent_id=node_idとして受け入れる。
+        sender = str(envelope.get("sender_node_id", envelope.get("sender_agent_id", "")))
+        receiver = str(
+            envelope.get("receiver_node_id", envelope.get("receiver_agent_id", ""))
+        )
 
         if sender != agent_id:
             raise RelayError(
                 code="RELAY_UNAUTHORIZED",
                 message="認証済みagent_idと送信者が一致しません。",
                 status_code=403,
-                details={"sender_agent_id": sender},
+                details={"sender_node_id": sender},
             )
         if receiver not in current.known_agents():
             raise RelayError(
                 code="RELAY_UNKNOWN_RECEIVER",
                 message="宛先エージェントが登録されていません。",
                 status_code=404,
-                details={"receiver_agent_id": receiver},
+                details={"receiver_node_id": receiver},
             )
 
         size = len(json.dumps(envelope, ensure_ascii=False).encode("utf-8"))

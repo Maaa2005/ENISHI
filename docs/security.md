@@ -7,5 +7,7 @@ Implemented so far:
 - Token comparison uses constant-time comparison (`secrets.compare_digest`).
 - Child processes are launched as a command name plus an argument array — never a concatenated shell string.
 - CLI detection is limited to `shutil.which` plus a `--version` probe. Credentials of other tools are never read.
-- Secrets are not written to SQLite or JSON. They go to the macOS Keychain (`com.twinlink.desktop`); this is wired up in Phase 5.
+- External-provider credentials are not stored by ENISHI. The Local Core bearer token exists only for the app session.
+- The node signing key is currently stored under the Local Core data directory with directory mode `0700` and file mode `0600`. Moving it to the macOS Keychain (`com.twinlink.desktop`) remains packaging work.
+- Human approval is risk-based: destructive and externally visible actions require approval, while explicitly delegated low-risk negotiations may complete automatically under the configured policy.
 - The Local Core is terminated when the app exits, leaving no orphan process.

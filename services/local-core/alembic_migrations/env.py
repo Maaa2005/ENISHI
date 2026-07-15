@@ -1,4 +1,4 @@
-"""Alembic environment for TwinLink Local Core."""
+"""Alembic environment for ENISHI Local Core."""
 
 from logging.config import fileConfig
 

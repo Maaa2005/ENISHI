@@ -1,5 +1,5 @@
 #!/bin/bash
-# TwinLink Desktopを開発モードで起動する（Rust + Node が必要）
+# ENISHI Desktopを開発モードで起動する（Rust + Node が必要）
 set -eu
 cd "$(dirname "$0")/.."
 

@@ -14,21 +14,30 @@ from twinlink_core.config import get_settings
 from twinlink_core.errors import TwinLinkError
 from twinlink_core.models import (
     Agreement,
+    Approval,
+    ApprovalStatus,
     CloneAgent,
     CloneStatus,
+    NegotiationDecision,
     NegotiationMessage,
     NegotiationSession,
     NegotiationStatus,
     PeerAgent,
     PeerStatus,
+    PersonalAgent,
+    RelayOutbox,
 )
+from twinlink_core.models.base import utc_now
 from twinlink_core.security.envelope import build_envelope, verify_envelope
 from twinlink_core.security.keys import ensure_node_keypair
 from twinlink_core.security.replay import check_and_record
 from twinlink_core.services import protocol_state
+from twinlink_core.services.approvals import create_approval
 from twinlink_core.services.audit import log_event
+from twinlink_core.services.decision_evaluator import evaluate_meeting_schedule
 from twinlink_core.services.memories import exportable_memories
 from twinlink_core.services.peers import filter_memories_for_peer, get_disclosure_policy
+from twinlink_core.services.policies import delegation_enabled
 from twinlink_core.services.relay_client import RelayTransport
 from twinlink_core.services.scheduling import (
     Slot,
@@ -107,6 +116,23 @@ def _save_message(
     return message
 
 
+def _enqueue_envelope(
+    session_db: Session,
+    negotiation: NegotiationSession,
+    envelope: dict[str, Any],
+    *,
+    approval_id: str | None = None,
+) -> RelayOutbox:
+    outbox = RelayOutbox(
+        message_id=str(envelope["message_id"]),
+        session_id=negotiation.id,
+        approval_id=approval_id,
+        envelope=envelope,
+    )
+    session_db.add(outbox)
+    return outbox
+
+
 def start_remote_negotiation(
     session_db: Session,
     relay: RelayTransport,
@@ -118,9 +144,42 @@ def start_remote_negotiation(
     preferred_time_ranges: list[dict[str, str]],
 ) -> NegotiationSession:
     """Relay経由で相手ノードへREQUESTとPROPOSEを送る（送信側）。"""
-    _require_trusted_peer(session_db, peer_agent_id)
-    clone = _find_active_clone(session_db, user_id)
-    identity, private_key = ensure_node_keypair(get_settings().data_dir)
+    peer = _require_trusted_peer(session_db, peer_agent_id)
+    if not delegation_enabled(
+        session_db, user_id, "schedule_negotiation", default=True
+    ):
+        raise TwinLinkError(
+            code="NEGOTIATION_PERMISSION_DENIED",
+            message="日程調整は本人代理AIへ委任されていません。",
+            status_code=403,
+            details={"operation": "schedule_negotiation"},
+        )
+    from twinlink_core.services.agent_requests import (
+        ensure_device_node,
+        ensure_personal_agent,
+    )
+
+    personal = ensure_personal_agent(session_db, user_id)
+    if personal.active_clone_id is None:
+        _find_active_clone(session_db, user_id)  # 既存エラー形式を維持
+    clone = session_db.get(CloneAgent, personal.active_clone_id)
+    if clone is None or clone.status != CloneStatus.ACTIVE.value:
+        raise TwinLinkError(
+            code="CLONE_REVIEW_REQUIRED",
+            message="有効化済みのクローンがありません。",
+            status_code=409,
+            details={"user_id": user_id},
+        )
+    node = ensure_device_node(session_db, personal)
+    _identity, private_key = ensure_node_keypair(get_settings().data_dir)
+    peer_personal_id = peer.personal_agent_id or peer.agent_id
+    separated_identity = peer.personal_agent_id is not None
+    sender_id = personal.id if separated_identity else node.node_id
+    transport_ids = (
+        {"sender_node_id": node.node_id, "receiver_node_id": peer.agent_id}
+        if separated_identity
+        else {}
+    )
 
     request_payload: dict[str, Any] = {
         "intent": INTENT,
@@ -135,7 +194,9 @@ def start_remote_negotiation(
 
     negotiation = NegotiationSession(
         initiator_clone_id=clone.id,
-        responder_clone_id=peer_agent_id,
+        responder_clone_id=peer.agent_id,
+        initiator_agent_id=personal.id,
+        responder_agent_id=peer_personal_id,
         intent=INTENT,
         topic=topic,
         remote_peer_agent_id=peer_agent_id,
@@ -146,8 +207,8 @@ def start_remote_negotiation(
 
     # busyの本文・予定名・除外理由は送らない（§17 v2）。構造化リクエストと候補のみ
     request_env = build_envelope(
-        sender=identity.agent_id,
-        receiver=peer_agent_id,
+        sender=sender_id,
+        receiver=peer_personal_id,
         session_id=negotiation.id,
         message_type="REQUEST",
         intent=INTENT,
@@ -157,10 +218,11 @@ def start_remote_negotiation(
         delta={},
         requires_human_approval=False,
         private_key=private_key,
+        **transport_ids,
     )
     propose_env = build_envelope(
-        sender=identity.agent_id,
-        receiver=peer_agent_id,
+        sender=sender_id,
+        receiver=peer_personal_id,
         session_id=negotiation.id,
         message_type="PROPOSE",
         intent=INTENT,
@@ -170,14 +232,17 @@ def start_remote_negotiation(
         delta={"candidate_slots": candidates},
         requires_human_approval=False,
         private_key=private_key,
+        **transport_ids,
     )
-    relay.send(request_env)
-    relay.send(propose_env)
-
     _save_message(session_db, negotiation.id, request_env)
     _save_message(session_db, negotiation.id, propose_env)
+    _enqueue_envelope(session_db, negotiation, request_env)
+    _enqueue_envelope(session_db, negotiation, propose_env)
     session_db.commit()
     session_db.refresh(negotiation)
+
+    # DB確定後にだけ外部送信する。失敗時はpendingのままワーカーが再送する。
+    flush_outbox(session_db, relay)
 
     log_event(
         session_db,
@@ -190,7 +255,12 @@ def start_remote_negotiation(
 def _last_message(session_db: Session, session_id: str) -> NegotiationMessage | None:
     return session_db.scalars(
         select(NegotiationMessage)
-        .where(NegotiationMessage.session_id == session_id)
+        .where(
+            NegotiationMessage.session_id == session_id,
+            NegotiationMessage.message_type.not_in(
+                ("REQUEST_APPROVAL", "APPROVAL_RESULT")
+            ),
+        )
         .order_by(NegotiationMessage.sequence.desc())
     ).first()
 
@@ -226,14 +296,60 @@ def _send_reply(
     session_db: Session,
     relay: RelayTransport,
     negotiation: NegotiationSession,
+    sender: str,
     receiver: str,
+    receiver_node_id: str,
     message_type: str,
     sequence: int,
     delta: dict[str, Any],
 ) -> None:
+    envelope = _build_reply_envelope(
+        session_db,
+        negotiation,
+        sender,
+        receiver,
+        receiver_node_id,
+        message_type,
+        sequence,
+        delta,
+    )
+    _save_message(session_db, negotiation.id, envelope)
+    _enqueue_envelope(session_db, negotiation, envelope)
+    negotiation.last_sequence = sequence
+
+
+def _build_reply_envelope(
+    session_db: Session,
+    negotiation: NegotiationSession,
+    sender: str,
+    receiver: str,
+    receiver_node_id: str,
+    message_type: str,
+    sequence: int,
+    delta: dict[str, Any],
+) -> dict[str, Any]:
     identity, private_key = ensure_node_keypair(get_settings().data_dir)
-    envelope = build_envelope(
-        sender=identity.agent_id,
+    transport_ids: dict[str, str] = {}
+    sender_id = identity.agent_id
+    if negotiation.responder_agent_id is not None:
+        personal = session_db.get(PersonalAgent, sender)
+        if personal is None:
+            raise TwinLinkError(
+                code="AGENT_IDENTITY_MISMATCH",
+                message="本人エージェントIDを確認できません。",
+                status_code=403,
+                details={"sender_agent_id": sender},
+            )
+        from twinlink_core.services.agent_requests import ensure_device_node
+
+        node = ensure_device_node(session_db, personal)
+        sender_id = personal.id
+        transport_ids = {
+            "sender_node_id": node.node_id,
+            "receiver_node_id": receiver_node_id,
+        }
+    return build_envelope(
+        sender=sender_id,
         receiver=receiver,
         session_id=negotiation.id,
         message_type=message_type,
@@ -244,10 +360,8 @@ def _send_reply(
         delta=delta,
         requires_human_approval=False,
         private_key=private_key,
+        **transport_ids,
     )
-    relay.send(envelope)
-    _save_message(session_db, negotiation.id, envelope)
-    negotiation.last_sequence = sequence
 
 
 def _create_remote_agreement(
@@ -264,8 +378,8 @@ def _create_remote_agreement(
     agreement = Agreement(
         session_id=negotiation.id,
         intent=negotiation.intent,
-        initiator_agent_id=negotiation.initiator_clone_id,
-        responder_agent_id=negotiation.responder_clone_id,
+        initiator_agent_id=negotiation.initiator_agent_id or negotiation.initiator_clone_id,
+        responder_agent_id=negotiation.responder_agent_id or negotiation.responder_clone_id,
         agreed_payload=agreed_payload,
     )
     session_db.add(agreement)
@@ -282,6 +396,228 @@ def _create_remote_agreement(
     return agreement
 
 
+def _record_decision(
+    session_db: Session,
+    negotiation: NegotiationSession,
+    clone: CloneAgent,
+    *,
+    common_slot_count: int,
+    selected_slot: dict[str, Any] | None,
+    peer_personal_agent_id: str,
+) -> NegotiationDecision:
+    evaluation = evaluate_meeting_schedule(
+        clone=clone,
+        delegation_enabled=delegation_enabled(
+            session_db, clone.user_id, "schedule_negotiation", default=True
+        ),
+        common_slot_count=common_slot_count,
+        selected_slot=selected_slot,
+        peer_personal_agent_id=peer_personal_agent_id,
+    )
+    decision = NegotiationDecision(
+        session_id=negotiation.id,
+        clone_id=clone.id,
+        policy_version=evaluation.policy_version,
+        outcome=evaluation.outcome,
+        reason_codes=evaluation.reason_codes,
+        evidence=evaluation.evidence,
+        confidence=evaluation.confidence,
+    )
+    session_db.add(decision)
+    session_db.flush()
+    return decision
+
+
+def _request_human_decision(
+    session_db: Session,
+    negotiation: NegotiationSession,
+    clone: CloneAgent,
+    decision: NegotiationDecision,
+    *,
+    selected_slot: dict[str, Any] | None,
+    candidate_slots: list[dict[str, Any]],
+    peer_node_id: str,
+    peer_personal_agent_id: str,
+) -> Approval:
+    approval = create_approval(
+        session_db,
+        user_id=clone.user_id,
+        action_type="negotiation_decision",
+        description="代理AIの交渉案について本人の判断が必要です。",
+        level=1,
+        payload={
+            "session_id": negotiation.id,
+            "intent": negotiation.intent,
+            "remote": True,
+            "proposed_action": "ACCEPT" if selected_slot else "COUNTER",
+            "selected_slot": selected_slot or {},
+            "candidate_slots": candidate_slots,
+            "reason_codes": list(decision.reason_codes),
+            "decision_confidence": decision.confidence,
+            "peer_node_id": peer_node_id,
+            "peer_personal_agent_id": peer_personal_agent_id,
+        },
+        commit=False,
+    )
+    negotiation.status = NegotiationStatus.WAITING_APPROVAL.value
+    negotiation.pending_approval_id = approval.id
+    # REQUEST_APPROVALはローカルのApproval/Decisionとして保持する。
+    # wireと共用するsequenceへ疑似メッセージを加えると、次の正規応答と
+    # 順序が衝突するためNegotiationMessageには保存しない。
+    return approval
+
+
+def flush_outbox(session_db: Session, relay: RelayTransport) -> dict[str, int]:
+    """固定message_idの署名済みEnvelopeを送る。失敗時はpendingのまま残す。"""
+    pending = list(
+        session_db.scalars(
+            select(RelayOutbox)
+            .where(RelayOutbox.status == "pending")
+            .order_by(RelayOutbox.created_at)
+        )
+    )
+    sent = 0
+    failed = 0
+    for item in pending:
+        item.attempts += 1
+        try:
+            relay.send(dict(item.envelope))
+        except Exception as exc:  # RelayTransport実装差を越えて永続キューへ記録する
+            item.last_error = str(exc)[:500]
+            failed += 1
+            session_db.commit()
+            # 同一セッションの後続メッセージが先行しないよう、順序を保って止める。
+            break
+        item.status = "sent"
+        item.sent_at = utc_now()
+        item.last_error = None
+        sent += 1
+        session_db.commit()
+    return {"sent": sent, "failed": failed, "pending": len(pending) - sent}
+
+
+def resolve_remote_approval(
+    session_db: Session,
+    approval_id: str,
+    target_status: str,
+) -> Approval:
+    """リモート交渉承認を一度だけ解決し、応答をOutboxへ原子的に保存する。"""
+    approval = session_db.get(Approval, approval_id)
+    if approval is None:
+        raise TwinLinkError(
+            code="APPROVAL_REQUIRED",
+            message="承認対象が見つかりません。",
+            status_code=404,
+            details={"approval_id": approval_id},
+        )
+    if approval.action_type != "negotiation_decision" or not approval.payload.get(
+        "remote"
+    ):
+        raise TwinLinkError(
+            code="INVALID_STATE_TRANSITION",
+            message="リモート交渉の承認ではありません。",
+            status_code=409,
+        )
+    if approval.status != ApprovalStatus.PENDING.value:
+        raise TwinLinkError(
+            code=(
+                "APPROVAL_EXPIRED"
+                if approval.status == ApprovalStatus.EXPIRED.value
+                else "INVALID_STATE_TRANSITION"
+            ),
+            message=f"状態 {approval.status} からは変更できません。",
+            status_code=409,
+            details={"status": approval.status},
+        )
+    if target_status not in {
+        ApprovalStatus.APPROVED.value,
+        ApprovalStatus.REJECTED.value,
+        ApprovalStatus.EXPIRED.value,
+    }:
+        raise ValueError(f"unsupported approval status: {target_status}")
+
+    session_id = str(approval.payload.get("session_id", ""))
+    negotiation = session_db.get(NegotiationSession, session_id)
+    if (
+        negotiation is None
+        or negotiation.status != NegotiationStatus.WAITING_APPROVAL.value
+        or negotiation.pending_approval_id != approval.id
+    ):
+        raise TwinLinkError(
+            code="INVALID_STATE_TRANSITION",
+            message="承認待ちの交渉を確認できません。",
+            status_code=409,
+            details={"session_id": session_id},
+        )
+
+    approved = target_status == ApprovalStatus.APPROVED.value
+    proposed_action = str(approval.payload.get("proposed_action", "ACCEPT"))
+    message_type = proposed_action if approved else "REJECT"
+    selected_slot = dict(approval.payload.get("selected_slot", {}))
+    candidate_slots = [
+        dict(slot) for slot in approval.payload.get("candidate_slots", [])
+        if isinstance(slot, dict)
+    ]
+    delta: dict[str, Any]
+    if approved and message_type == "ACCEPT":
+        delta = {"selected_slot": selected_slot}
+    elif approved and message_type == "COUNTER":
+        delta = {"candidate_slots": candidate_slots[:_OFFER_SIZE]}
+    else:
+        delta = {
+            "code": "HUMAN_REJECTED"
+            if target_status == "rejected"
+            else "APPROVAL_EXPIRED"
+        }
+    own_personal_id = negotiation.responder_agent_id or ""
+    peer_personal_id = str(
+        approval.payload.get("peer_personal_agent_id")
+        or negotiation.initiator_agent_id
+        or negotiation.initiator_clone_id
+    )
+    peer_node_id = str(
+        approval.payload.get("peer_node_id") or negotiation.remote_peer_agent_id or ""
+    )
+    sequence = negotiation.last_sequence + 1
+    envelope = _build_reply_envelope(
+        session_db,
+        negotiation,
+        own_personal_id,
+        peer_personal_id,
+        peer_node_id,
+        message_type,
+        sequence,
+        delta,
+    )
+    _save_message(session_db, negotiation.id, envelope)
+    _enqueue_envelope(
+        session_db, negotiation, envelope, approval_id=approval.id
+    )
+    negotiation.last_sequence = sequence
+    negotiation.pending_approval_id = None
+    approval.status = target_status
+    approval.resolved_at = utc_now()
+    if approved and message_type == "ACCEPT":
+        negotiation.status = NegotiationStatus.AGREED.value
+        negotiation.result = {"selected_slot": selected_slot, "approved_by_human": True}
+        _create_remote_agreement(session_db, negotiation, negotiation.result)
+    elif approved:
+        negotiation.status = NegotiationStatus.OPEN.value
+        negotiation.result = {"counter_approved_by_human": True}
+    else:
+        negotiation.status = NegotiationStatus.FAILED.value
+        negotiation.result = {"code": delta["code"], "resolved_by_human": True}
+    session_db.commit()
+    session_db.refresh(approval)
+    log_event(
+        session_db,
+        event_type=f"approval_{target_status}",
+        user_id=approval.user_id,
+        payload={"approval_id": approval.id, "action_type": approval.action_type},
+    )
+    return approval
+
+
 def _handle_envelope(
     session_db: Session, relay: RelayTransport, envelope: dict[str, Any]
 ) -> dict[str, str]:
@@ -291,6 +627,8 @@ def _handle_envelope(
     message_type = str(envelope.get("message_type", ""))
     sequence = int(envelope.get("sequence", 0))
     sender = str(envelope.get("sender_agent_id", ""))
+    sender_node = str(envelope.get("sender_node_id", sender))
+    receiver = str(envelope.get("receiver_agent_id", ""))
 
     negotiation = session_db.get(NegotiationSession, session_id)
     last = _last_message(session_db, session_id) if negotiation else None
@@ -304,14 +642,33 @@ def _handle_envelope(
     )
 
     if message_type == "REQUEST":
-        clone = _find_active_clone(session_db)
+        if "sender_node_id" in envelope:
+            personal = session_db.get(PersonalAgent, receiver)
+            if personal is None or personal.active_clone_id is None:
+                raise TwinLinkError(
+                    code="AGENT_IDENTITY_MISMATCH",
+                    message="宛先の本人エージェントを確認できません。",
+                    status_code=403,
+                )
+            clone = session_db.get(CloneAgent, personal.active_clone_id)
+            if clone is None:
+                raise TwinLinkError(
+                    code="CLONE_REVIEW_REQUIRED",
+                    message="有効化済みのクローンがありません。",
+                    status_code=409,
+                )
+            responder_id = clone.id
+        else:
+            responder_id = _find_active_clone(session_db).id
         negotiation = NegotiationSession(
             id=session_id,
             initiator_clone_id=sender,
-            responder_clone_id=clone.id,
+            responder_clone_id=responder_id,
+            initiator_agent_id=sender if "sender_node_id" in envelope else None,
+            responder_agent_id=receiver if "sender_node_id" in envelope else None,
             intent=str(envelope.get("intent", INTENT)),
             topic=str(envelope.get("payload", {}).get("topic", "")),
-            remote_peer_agent_id=sender,
+            remote_peer_agent_id=sender_node,
             last_sequence=sequence,
         )
         session_db.add(negotiation)
@@ -331,16 +688,56 @@ def _handle_envelope(
     negotiation.last_sequence = sequence
 
     if message_type in ("PROPOSE", "COUNTER"):
-        clone = _find_active_clone(session_db)
+        personal = None
+        if negotiation.responder_agent_id is not None:
+            personal = session_db.get(PersonalAgent, negotiation.responder_agent_id)
+            if personal is None or personal.active_clone_id is None:
+                raise TwinLinkError(
+                    code="CLONE_REVIEW_REQUIRED",
+                    message="有効化済みのクローンがありません。",
+                    status_code=409,
+                )
+            clone = session_db.get(CloneAgent, personal.active_clone_id)
+            if clone is None or clone.status != CloneStatus.ACTIVE.value:
+                raise TwinLinkError(
+                    code="CLONE_REVIEW_REQUIRED",
+                    message="有効化済みのクローンがありません。",
+                    status_code=409,
+                )
+        else:
+            clone = _find_active_clone(session_db)
         request_payload = _request_payload(session_db, session_id)
-        own = _own_candidates(session_db, clone.user_id, request_payload, sender)
+        own = _own_candidates(session_db, clone.user_id, request_payload, sender_node)
         received = [dict(s) for s in envelope.get("delta", {}).get("candidate_slots", [])]
         common = intersect_slots(own, received)
         rounds = _counter_rounds(session_db, session_id) + 1
+        sender_personal_id = personal.id if personal else ""
+        decision = _record_decision(
+            session_db,
+            negotiation,
+            clone,
+            common_slot_count=len(common),
+            selected_slot=common[0] if common else None,
+            peer_personal_agent_id=sender,
+        )
+        if decision.outcome == "approval_required":
+            _request_human_decision(
+                session_db,
+                negotiation,
+                clone,
+                decision,
+                selected_slot=common[0] if common else None,
+                candidate_slots=[] if common else own[:_OFFER_SIZE],
+                peer_node_id=sender_node,
+                peer_personal_agent_id=sender,
+            )
+            session_db.commit()
+            return {"message_id": message_id, "action": "approval_required"}
         if common:
             selected = common[0]
             _send_reply(
-                session_db, relay, negotiation, sender, "ACCEPT", sequence + 1,
+                session_db, relay, negotiation, sender_personal_id, sender, sender_node,
+                "ACCEPT", sequence + 1,
                 {"selected_slot": selected},
             )
             negotiation.status = NegotiationStatus.AGREED.value
@@ -348,12 +745,14 @@ def _handle_envelope(
             _create_remote_agreement(session_db, negotiation, negotiation.result)
         elif rounds < protocol_state.MAX_COUNTER_ROUNDS:
             _send_reply(
-                session_db, relay, negotiation, sender, "COUNTER", sequence + 1,
+                session_db, relay, negotiation, sender_personal_id, sender, sender_node,
+                "COUNTER", sequence + 1,
                 {"candidate_slots": own[:_OFFER_SIZE]},
             )
         else:
             _send_reply(
-                session_db, relay, negotiation, sender, "ERROR", sequence + 1,
+                session_db, relay, negotiation, sender_personal_id, sender, sender_node,
+                "ERROR", sequence + 1,
                 {"code": "NO_AVAILABLE_SLOT"},
             )
             negotiation.status = NegotiationStatus.FAILED.value
@@ -382,12 +781,32 @@ def process_inbox(session_db: Session, relay: RelayTransport) -> dict[str, Any]:
     results: list[dict[str, str]] = []
 
     for delivery in relay.fetch():
-        delivery_id = str(delivery["delivery_id"])
-        envelope = dict(delivery["envelope"])
+        delivery_id = str(delivery.get("delivery_id", ""))
+        raw_envelope = delivery.get("envelope")
+        if not delivery_id or not isinstance(raw_envelope, dict):
+            if delivery_id:
+                relay.ack(delivery_id)
+            log_event(
+                session_db,
+                event_type="envelope_rejected",
+                payload={"message_id": "", "code": "MESSAGE_SCHEMA_INVALID"},
+            )
+            results.append(
+                {
+                    "message_id": "",
+                    "action": "rejected",
+                    "code": "MESSAGE_SCHEMA_INVALID",
+                }
+            )
+            continue
+        envelope = dict(raw_envelope)
         message_id = str(envelope.get("message_id", ""))
         sender = str(envelope.get("sender_agent_id", ""))
+        sender_node = str(envelope.get("sender_node_id", sender))
+        receiver = str(envelope.get("receiver_agent_id", ""))
+        receiver_node = str(envelope.get("receiver_node_id", receiver))
 
-        peer = session_db.get(PeerAgent, sender)
+        peer = session_db.get(PeerAgent, sender_node)
         if peer is None or peer.status != PeerStatus.TRUSTED.value:
             relay.ack(delivery_id)
             log_event(
@@ -397,6 +816,30 @@ def process_inbox(session_db: Session, relay: RelayTransport) -> dict[str, Any]:
             )
             results.append(
                 {"message_id": message_id, "action": "rejected", "code": "PEER_NOT_TRUSTED"}
+            )
+            continue
+
+        mapped_personal_id = peer.personal_agent_id or peer.agent_id
+        is_separated_identity = "sender_node_id" in envelope
+        local_identity, _private_key = ensure_node_keypair(get_settings().data_dir)
+        local_personal = session_db.get(PersonalAgent, receiver)
+        if (
+            (is_separated_identity and mapped_personal_id != sender)
+            or (is_separated_identity and receiver_node != local_identity.agent_id)
+            or (is_separated_identity and local_personal is None)
+        ):
+            relay.ack(delivery_id)
+            log_event(
+                session_db,
+                event_type="envelope_rejected",
+                payload={"message_id": message_id, "code": "AGENT_IDENTITY_MISMATCH"},
+            )
+            results.append(
+                {
+                    "message_id": message_id,
+                    "action": "rejected",
+                    "code": "AGENT_IDENTITY_MISMATCH",
+                }
             )
             continue
 
@@ -434,7 +877,26 @@ def process_inbox(session_db: Session, relay: RelayTransport) -> dict[str, Any]:
             )
             results.append({"message_id": message_id, "action": "rejected", "code": exc.code})
             continue
+        except Exception:
+            # 署名後のpayload変換等で未知の例外が起きても配送単位で隔離する。
+            session_db.rollback()
+            relay.ack(delivery_id)
+            log_event(
+                session_db,
+                event_type="envelope_rejected",
+                payload={"message_id": message_id, "code": "MESSAGE_PROCESSING_FAILED"},
+            )
+            results.append(
+                {
+                    "message_id": message_id,
+                    "action": "rejected",
+                    "code": "MESSAGE_PROCESSING_FAILED",
+                }
+            )
+            continue
 
+        # 応答は処理トランザクションでOutboxへ確定済み。送信失敗でも受信はackできる。
+        flush_outbox(session_db, relay)
         relay.ack(delivery_id)
 
     log_event(
