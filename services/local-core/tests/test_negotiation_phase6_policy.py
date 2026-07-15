@@ -161,9 +161,9 @@ def test_disclosure_policy_filters_private_context_payload(
 def test_share_schedule_false_rejects_remote_schedule_query(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
-    from twinlink_core.database import get_session
-    from twinlink_core.errors import TwinLinkError
-    from twinlink_core.services.remote_negotiation import start_remote_negotiation
+    from enishi_core.database import get_session
+    from enishi_core.errors import EnishiError
+    from enishi_core.services.remote_negotiation import start_remote_negotiation
 
     user_id = _create_user(client, auth_headers, "中村")
     _activate_clone(client, auth_headers, user_id)
@@ -183,7 +183,7 @@ def test_share_schedule_false_rejects_remote_schedule_query(
 
     session = next(get_session())
     try:
-        with pytest.raises(TwinLinkError) as exc:
+        with pytest.raises(EnishiError) as exc:
             start_remote_negotiation(
                 session,
                 _FakeRelay(),
@@ -312,8 +312,8 @@ def test_negotiation_escalation_rejects(
 def test_negotiation_escalation_expiry_rejects_and_cannot_later_accept(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
-    from twinlink_core.database import get_session
-    from twinlink_core.models import Approval
+    from enishi_core.database import get_session
+    from enishi_core.models import Approval
 
     initiator = _create_user(client, auth_headers, "中村")
     responder = _create_user(client, auth_headers, "田中")
@@ -345,9 +345,9 @@ def test_negotiation_escalation_expiry_rejects_and_cannot_later_accept(
 def test_agreement_status_patch_and_audit_payload_omits_body(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
+    from enishi_core.database import get_session
+    from enishi_core.models import AuditLog
     from sqlalchemy import select
-    from twinlink_core.database import get_session
-    from twinlink_core.models import AuditLog
 
     initiator = _create_user(client, auth_headers, "中村")
     responder = _create_user(client, auth_headers, "田中")
@@ -389,11 +389,11 @@ def test_agreement_status_patch_and_audit_payload_omits_body(
 def test_relay_redelivery_does_not_process_twice(
     client: TestClient, auth_headers: dict[str, str], tmp_path: Any
 ) -> None:
-    from twinlink_core.database import get_session
-    from twinlink_core.models import NegotiationMessage, NegotiationSession, PeerAgent
-    from twinlink_core.security.envelope import build_envelope
-    from twinlink_core.security.keys import ensure_node_keypair
-    from twinlink_core.services.remote_negotiation import process_inbox
+    from enishi_core.database import get_session
+    from enishi_core.models import NegotiationMessage, NegotiationSession, PeerAgent
+    from enishi_core.security.envelope import build_envelope
+    from enishi_core.security.keys import ensure_node_keypair
+    from enishi_core.services.remote_negotiation import process_inbox
 
     user_id = _create_user(client, auth_headers, "受信者")
     _activate_clone(client, auth_headers, user_id)
@@ -448,10 +448,10 @@ def test_relay_redelivery_does_not_process_twice(
 def test_restricted_schedule_body_reason_and_raw_range_not_sent_or_logged(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
+    from enishi_core.database import get_session
+    from enishi_core.models import AuditLog
+    from enishi_core.services.remote_negotiation import start_remote_negotiation
     from sqlalchemy import select
-    from twinlink_core.database import get_session
-    from twinlink_core.models import AuditLog
-    from twinlink_core.services.remote_negotiation import start_remote_negotiation
 
     marker = "restricted-secret-body"
     user_id = _create_user(client, auth_headers, "中村")
@@ -497,8 +497,8 @@ def test_restricted_schedule_body_reason_and_raw_range_not_sent_or_logged(
 def test_disclosure_policy_affects_remote_candidate_calculation_and_payload(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
-    from twinlink_core.database import get_session
-    from twinlink_core.services.remote_negotiation import start_remote_negotiation
+    from enishi_core.database import get_session
+    from enishi_core.services.remote_negotiation import start_remote_negotiation
 
     user_id = _create_user(client, auth_headers, "中村")
     _activate_clone(client, auth_headers, user_id)

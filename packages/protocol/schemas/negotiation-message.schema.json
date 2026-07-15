@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://twinlink.local/schemas/negotiation-message.schema.json",
+  "$id": "https://enishi.local/schemas/negotiation-message.schema.json",
   "title": "AUN Protocol 0.1 Negotiation Message",
-  "description": "twinlink.md §25 のエージェント間共通メッセージ形式",
+  "description": "enishi.md §25 のエージェント間共通メッセージ形式",
   "type": "object",
   "properties": {
     "protocol": {
       "type": "string",
-      "const": "twinlink/0.1"
+      "const": "aun/0.1"
     },
     "message_id": {
       "type": "string",

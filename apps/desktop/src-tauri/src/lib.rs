@@ -12,7 +12,7 @@ pub fn run() {
     let child = match process::spawn_core(port, &token) {
         Ok(child) => Some(child),
         Err(error) => {
-            eprintln!("failed to start twinlink-core: {error}");
+            eprintln!("failed to start enishi-core: {error}");
             None
         }
     };
@@ -25,7 +25,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building ENISHI")
         .run(|app_handle, event| {
-            // アプリ終了時にLocal Coreも終了させ、孤立プロセスを残さない（twinlink.md §10）
+            // アプリ終了時にLocal Coreも終了させ、孤立プロセスを残さない（enishi.md §10）
             if let tauri::RunEvent::Exit = event {
                 use tauri::Manager;
                 if let Some(state) = app_handle.try_state::<AppState>() {

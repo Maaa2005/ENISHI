@@ -8,6 +8,6 @@ Implemented so far:
 - Child processes are launched as a command name plus an argument array — never a concatenated shell string.
 - CLI detection is limited to `shutil.which` plus a `--version` probe. Credentials of other tools are never read.
 - External-provider credentials are not stored by ENISHI. The Local Core bearer token exists only for the app session.
-- Tauri-launched Local Core stores the node signing key in the macOS Keychain (`com.twinlink.desktop`). Existing `0600` file keys are migrated on first launch and then removed. Standalone CLI demos retain the `0700` directory / `0600` file fallback.
+- Tauri-launched Local Core stores the node signing key in the macOS Keychain (`com.enishi.desktop`). Existing `0600` file keys are migrated on first launch and then removed. Standalone CLI demos retain the `0700` directory / `0600` file fallback.
 - Human approval is risk-based: destructive and externally visible actions require approval, while explicitly delegated low-risk negotiations may complete automatically under the configured policy.
 - The Local Core is terminated when the app exits, leaving no orphan process.

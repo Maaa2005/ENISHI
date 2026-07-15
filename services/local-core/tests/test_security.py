@@ -4,10 +4,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from enishi_core.errors import EnishiError
+from enishi_core.security.envelope import build_envelope, verify_envelope
+from enishi_core.security.keys import ensure_node_keypair
 from fastapi.testclient import TestClient
-from twinlink_core.errors import TwinLinkError
-from twinlink_core.security.envelope import build_envelope, verify_envelope
-from twinlink_core.security.keys import ensure_node_keypair
 
 
 def test_keypair_stable_and_permissions(tmp_path: Path) -> None:
@@ -27,15 +27,15 @@ def test_keypair_stable_and_permissions(tmp_path: Path) -> None:
 def test_keypair_uses_keyring_and_migrates_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import twinlink_core.security.keys as keys_module
+    import enishi_core.security.keys as keys_module
 
-    monkeypatch.delenv("TWINLINK_KEYRING_SERVICE", raising=False)
+    monkeypatch.delenv("ENISHI_KEYRING_SERVICE", raising=False)
     original_identity, _ = ensure_node_keypair(tmp_path)
     key_path = tmp_path / "keys" / "node_ed25519.key"
     assert key_path.exists()
 
     stored: dict[str, str] = {}
-    monkeypatch.setenv("TWINLINK_KEYRING_SERVICE", "com.twinlink.desktop.test")
+    monkeypatch.setenv("ENISHI_KEYRING_SERVICE", "com.enishi.desktop.test")
     monkeypatch.setattr(keys_module, "_keyring_get", lambda service: stored.get(service))
     monkeypatch.setattr(
         keys_module, "_keyring_set", lambda service, value: stored.__setitem__(service, value)
@@ -46,16 +46,16 @@ def test_keypair_uses_keyring_and_migrates_file(
 
     assert migrated_identity == original_identity
     assert reloaded_identity == original_identity
-    assert "com.twinlink.desktop.test" in stored
+    assert "com.enishi.desktop.test" in stored
     assert not key_path.exists()
 
 
 def test_keyring_corruption_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import twinlink_core.security.keys as keys_module
+    import enishi_core.security.keys as keys_module
 
-    monkeypatch.setenv("TWINLINK_KEYRING_SERVICE", "com.twinlink.desktop.test")
+    monkeypatch.setenv("ENISHI_KEYRING_SERVICE", "com.enishi.desktop.test")
     monkeypatch.setattr(keys_module, "_keyring_get", lambda _service: "not-base64")
 
     with pytest.raises(RuntimeError, match="Keychain"):
@@ -114,7 +114,7 @@ def test_envelope_schema_rejects_wrong_sequence_type(tmp_path: Path) -> None:
         requires_human_approval=False,
         private_key=private_key,
     )
-    with pytest.raises(TwinLinkError) as exc:
+    with pytest.raises(EnishiError) as exc:
         verify_envelope(envelope, identity.public_key_b64)
     assert exc.value.code == "MESSAGE_SCHEMA_INVALID"
 
@@ -122,7 +122,7 @@ def test_envelope_schema_rejects_wrong_sequence_type(tmp_path: Path) -> None:
 def test_envelope_payload_tamper_rejected(tmp_path: Path) -> None:
     envelope, public_key = _signed_envelope(tmp_path)
     envelope["delta"] = {"candidate_slots": []}
-    with pytest.raises(TwinLinkError) as exc:
+    with pytest.raises(EnishiError) as exc:
         verify_envelope(envelope, public_key)
     assert exc.value.code == "MESSAGE_SIGNATURE_INVALID"
 
@@ -130,7 +130,7 @@ def test_envelope_payload_tamper_rejected(tmp_path: Path) -> None:
 def test_envelope_signature_tamper_rejected(tmp_path: Path) -> None:
     envelope, public_key = _signed_envelope(tmp_path)
     envelope["signature"] = "AAAA" + str(envelope["signature"])[4:]
-    with pytest.raises(TwinLinkError) as exc:
+    with pytest.raises(EnishiError) as exc:
         verify_envelope(envelope, public_key)
     assert exc.value.code == "MESSAGE_SIGNATURE_INVALID"
 
@@ -138,19 +138,19 @@ def test_envelope_signature_tamper_rejected(tmp_path: Path) -> None:
 def test_envelope_expired_rejected(tmp_path: Path) -> None:
     envelope, public_key = _signed_envelope(tmp_path)
     future = datetime.now(UTC) + timedelta(seconds=400)
-    with pytest.raises(TwinLinkError) as exc:
+    with pytest.raises(EnishiError) as exc:
         verify_envelope(envelope, public_key, now=future)
     assert exc.value.code == "MESSAGE_EXPIRED"
 
 
 def test_replay_rejected(client: TestClient) -> None:
-    from twinlink_core.database import get_session
-    from twinlink_core.security.replay import check_and_record
+    from enishi_core.database import get_session
+    from enishi_core.security.replay import check_and_record
 
     session = next(get_session())
     try:
         check_and_record(session, "msg-001")
-        with pytest.raises(TwinLinkError) as exc:
+        with pytest.raises(EnishiError) as exc:
             check_and_record(session, "msg-001")
         assert exc.value.code == "MESSAGE_REPLAYED"
         assert exc.value.status_code == 409

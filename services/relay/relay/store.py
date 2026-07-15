@@ -1,4 +1,4 @@
-"""インメモリメールボックス（twinlink.md §25 Relay Serverの責務 v2）。
+"""インメモリメールボックス（enishi.md §25 Relay Serverの責務 v2）。
 
 配送のみを行い、本文を改変しない。TTL経過後のメッセージは
 put/fetch時に遅延削除する。ack前のメッセージは再取得できる（再配送許容）。

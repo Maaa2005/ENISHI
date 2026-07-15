@@ -60,9 +60,9 @@ def test_blocked_peer_cannot_be_trusted(
 def test_audit_log_has_fingerprint_but_not_public_key(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
+    from enishi_core.database import get_session
+    from enishi_core.models import AuditLog
     from sqlalchemy import select
-    from twinlink_core.database import get_session
-    from twinlink_core.models import AuditLog
 
     peer = _register(client, auth_headers)
     client.post(f"/v1/peers/{peer['agent_id']}/trust", headers=auth_headers)

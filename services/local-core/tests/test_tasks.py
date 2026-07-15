@@ -116,8 +116,8 @@ def test_level2_task_is_never_claimable_before_approval(
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from twinlink_core.database import get_session
-    from twinlink_core.services import tasks as task_service
+    from enishi_core.database import get_session
+    from enishi_core.services import tasks as task_service
 
     user_id, clone_id, _project_id = _setup_active_clone(client, auth_headers)
     claim_results: list[str | None] = []

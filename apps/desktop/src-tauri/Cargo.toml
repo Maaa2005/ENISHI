@@ -1,11 +1,11 @@
 [package]
-name = "twinlink-desktop"
+name = "enishi-desktop"
 version = "0.1.0"
 edition = "2021"
 description = "ENISHI - personal AI agent coordination platform for macOS"
 
 [lib]
-name = "twinlink_desktop_lib"
+name = "enishi_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

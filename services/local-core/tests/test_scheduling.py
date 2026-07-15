@@ -1,4 +1,4 @@
-from twinlink_core.services.scheduling import candidate_slots, intersect_slots, overlaps
+from enishi_core.services.scheduling import candidate_slots, intersect_slots, overlaps
 
 _DATE_RANGE = {"start": "2026-07-13", "end": "2026-07-13"}
 _AFTERNOON = [{"start": "13:00", "end": "15:00"}]

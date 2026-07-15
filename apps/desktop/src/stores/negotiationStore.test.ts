@@ -15,7 +15,7 @@ const session = {
 };
 
 const message = {
-  protocol: "twinlink/0.1",
+  protocol: "aun/0.1",
   message_id: "m1",
   session_id: "n1",
   sender_agent_id: "c1",

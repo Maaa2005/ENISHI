@@ -11,18 +11,18 @@ TEST_TOKEN = "test-local-token"
 
 @pytest.fixture()
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
-    monkeypatch.setenv("TWINLINK_LOCAL_TOKEN", TEST_TOKEN)
-    monkeypatch.setenv("TWINLINK_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("TWINLINK_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("TWINLINK_LOG_DIR", str(tmp_path / "logs"))
-    monkeypatch.setenv("TWINLINK_TASK_WORKER_POLL_INTERVAL_SECONDS", "0.01")
-    monkeypatch.setenv("TWINLINK_MOCK_TASK_TIMEOUT_SECONDS", "2")
+    monkeypatch.setenv("ENISHI_LOCAL_TOKEN", TEST_TOKEN)
+    monkeypatch.setenv("ENISHI_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("ENISHI_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("ENISHI_LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setenv("ENISHI_TASK_WORKER_POLL_INTERVAL_SECONDS", "0.01")
+    monkeypatch.setenv("ENISHI_MOCK_TASK_TIMEOUT_SECONDS", "2")
 
-    from twinlink_core.config import get_settings
+    from enishi_core.config import get_settings
 
     get_settings.cache_clear()
 
-    from twinlink_core.main import create_app
+    from enishi_core.main import create_app
 
     app = create_app()
     with TestClient(app) as test_client:

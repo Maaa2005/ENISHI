@@ -1,9 +1,9 @@
 from typing import Any
 
 import pytest
+from enishi_core.errors import EnishiError
+from enishi_core.services.agent_requests import interpret_meeting_request
 from fastapi.testclient import TestClient
-from twinlink_core.errors import TwinLinkError
-from twinlink_core.services.agent_requests import interpret_meeting_request
 
 _PUBLIC_KEY = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
 
@@ -60,7 +60,7 @@ def test_parser_accepts_only_explicit_meeting_format() -> None:
     assert parsed["duration_minutes"] == 30
     assert parsed["preferred_time_ranges"] == [{"start": "13:00", "end": "17:00"}]
 
-    with pytest.raises(TwinLinkError) as exc:
+    with pytest.raises(EnishiError) as exc:
         interpret_meeting_request("来週の午後に打ち合わせ")
     assert exc.value.code == "AGENT_REQUEST_AMBIGUOUS"
 
@@ -85,7 +85,7 @@ def test_ambiguous_request_does_not_send(
     client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     relay = _FakeRelay()
-    monkeypatch.setattr("twinlink_core.api.routes.get_relay_client", lambda: relay)
+    monkeypatch.setattr("enishi_core.api.routes.get_relay_client", lambda: relay)
     user_id = _user(client, auth_headers)
     _activate(client, auth_headers, user_id)
     _trusted_peer(client, auth_headers)
@@ -103,11 +103,11 @@ def test_ambiguous_request_does_not_send(
 def test_agent_request_uses_personal_ids_and_node_transport_ids(
     client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from twinlink_core.database import get_session
-    from twinlink_core.models import DeviceNode, PersonalAgent
+    from enishi_core.database import get_session
+    from enishi_core.models import DeviceNode, PersonalAgent
 
     relay = _FakeRelay()
-    monkeypatch.setattr("twinlink_core.api.routes.get_relay_client", lambda: relay)
+    monkeypatch.setattr("enishi_core.api.routes.get_relay_client", lambda: relay)
     user_id = _user(client, auth_headers)
     _activate(client, auth_headers, user_id)
     _trusted_peer(client, auth_headers)
@@ -140,7 +140,7 @@ def test_agent_request_requires_active_clone(
     client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     relay = _FakeRelay()
-    monkeypatch.setattr("twinlink_core.api.routes.get_relay_client", lambda: relay)
+    monkeypatch.setattr("enishi_core.api.routes.get_relay_client", lambda: relay)
     user_id = _user(client, auth_headers)
     _trusted_peer(client, auth_headers)
     response = client.post(
@@ -160,7 +160,7 @@ def test_agent_request_respects_schedule_delegation(
     client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     relay = _FakeRelay()
-    monkeypatch.setattr("twinlink_core.api.routes.get_relay_client", lambda: relay)
+    monkeypatch.setattr("enishi_core.api.routes.get_relay_client", lambda: relay)
     user_id = _user(client, auth_headers)
     _activate(client, auth_headers, user_id)
     _trusted_peer(client, auth_headers)
@@ -189,7 +189,7 @@ def test_multiple_peer_candidates_require_selection_without_sending(
     client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     relay = _FakeRelay()
-    monkeypatch.setattr("twinlink_core.api.routes.get_relay_client", lambda: relay)
+    monkeypatch.setattr("enishi_core.api.routes.get_relay_client", lambda: relay)
     user_id = _user(client, auth_headers)
     _activate(client, auth_headers, user_id)
     for agent_id, name, aliases in (
@@ -237,7 +237,7 @@ def test_agent_request_falls_back_to_legacy_wire_for_existing_peer(
     client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     relay = _FakeRelay()
-    monkeypatch.setattr("twinlink_core.api.routes.get_relay_client", lambda: relay)
+    monkeypatch.setattr("enishi_core.api.routes.get_relay_client", lambda: relay)
     user_id = _user(client, auth_headers)
     _activate(client, auth_headers, user_id)
     created = client.post(

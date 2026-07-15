@@ -39,8 +39,8 @@ def _add_memory(
 
 
 def _build_draft(user_id: str, project_id: str | None = None) -> dict[str, object]:
-    from twinlink_core.database import get_session
-    from twinlink_core.services.clone_bootstrap import build_clone_draft
+    from enishi_core.database import get_session
+    from enishi_core.services.clone_bootstrap import build_clone_draft
 
     session = next(get_session())
     try:
@@ -98,9 +98,9 @@ def test_duplicate_memory_highest_confidence_wins(
         client, auth_headers, user_id, title="重複", content=content, confidence=0.9
     )
 
-    from twinlink_core.database import get_session
-    from twinlink_core.services.clone_bootstrap import _deduplicate
-    from twinlink_core.services.memories import exportable_memories
+    from enishi_core.database import get_session
+    from enishi_core.services.clone_bootstrap import _deduplicate
+    from enishi_core.services.memories import exportable_memories
 
     session = next(get_session())
     try:
@@ -124,8 +124,8 @@ def test_conflicting_memory_latest_updated_wins(
     )
 
     # updated_at を明示的にずらして決定的にする
-    from twinlink_core.database import get_session
-    from twinlink_core.models import MemoryItem
+    from enishi_core.database import get_session
+    from enishi_core.models import MemoryItem
 
     session = next(get_session())
     try:
@@ -179,7 +179,7 @@ def test_secret_memory_excluded_from_all_profiles(
 
 
 def test_collect_project_signals(tmp_path: Path) -> None:
-    from twinlink_core.services.memory_sources import collect_project_signals
+    from enishi_core.services.memory_sources import collect_project_signals
 
     (tmp_path / "pyproject.toml").write_text(
         '[project]\ndependencies = ["fastapi", "sqlalchemy"]\n', encoding="utf-8"
@@ -194,7 +194,7 @@ def test_collect_project_signals(tmp_path: Path) -> None:
 
 
 def test_collect_project_signals_skips_symlink_escape(tmp_path: Path) -> None:
-    from twinlink_core.services.memory_sources import collect_project_signals
+    from enishi_core.services.memory_sources import collect_project_signals
 
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -247,8 +247,8 @@ def test_ensure_clone_reflects_memories_via_api(
     listed = client.get(f"/v1/clones/{user_id}", headers=auth_headers).json()
     assert len(listed) == 1
 
-    from twinlink_core.database import get_session
-    from twinlink_core.models import CloneAgent
+    from enishi_core.database import get_session
+    from enishi_core.models import CloneAgent
 
     session = next(get_session())
     try:

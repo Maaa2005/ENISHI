@@ -2,8 +2,8 @@ from fastapi.testclient import TestClient
 
 
 def _insert_metric(method: str, input_tokens: int, output_tokens: int) -> None:
-    from twinlink_core.database import get_session
-    from twinlink_core.models import TokenMetric
+    from enishi_core.database import get_session
+    from enishi_core.models import TokenMetric
 
     session = next(get_session())
     try:

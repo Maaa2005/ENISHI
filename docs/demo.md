@@ -72,7 +72,7 @@ Point the desktop app at User A:
 
 ```bash
 cd apps/desktop
-TWINLINK_LOCAL_PORT=8871 TWINLINK_LOCAL_TOKEN=demo-token-a npm run dev
+ENISHI_LOCAL_PORT=8871 ENISHI_LOCAL_TOKEN=demo-token-a npm run dev
 ```
 
 Walkthrough:

@@ -1,5 +1,5 @@
 #!/bin/bash
-# ENISHI macOS環境確認スクリプト（twinlink.md §5）
+# ENISHI macOS環境確認スクリプト（enishi.md §5）
 # 不足ツールを検出して表示する。インストールは行わない。
 set -u
 

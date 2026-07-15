@@ -19,11 +19,11 @@ apps/desktop/src-tauri/gen/
 # macOS
 .DS_Store
 
-# TwinLink
+# ENISHI
 .tmp/
 .env
 *.db
 
 # Private design spec (not for public repo)
-twinlink.md
-twinlink_ui.md
+enishi.md
+enishi_ui.md

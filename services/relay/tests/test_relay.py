@@ -12,7 +12,7 @@ SECRET_MARKER = "極秘予定の本文"
 
 def _envelope(sender: str = AGENT_A, receiver: str = AGENT_B) -> dict[str, object]:
     return {
-        "protocol": "twinlink/0.1",
+        "protocol": "aun/0.1",
         "message_id": "m001",
         "session_id": "s001",
         "sender_agent_id": sender,
@@ -131,7 +131,7 @@ def test_logs_do_not_contain_message_body(
     headers_a: dict[str, str],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    with caplog.at_level(logging.INFO, logger="twinlink.relay"):
+    with caplog.at_level(logging.INFO, logger="enishi.relay"):
         client.post("/v1/messages", json=_envelope(), headers=headers_a)
 
     assert caplog.records, "配送メタデータのログが出力されること"

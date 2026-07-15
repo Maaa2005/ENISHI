@@ -1,8 +1,8 @@
 from pathlib import Path
 
+from enishi_core.providers.claude_code import build_task_command as build_claude_command
+from enishi_core.providers.codex import build_task_command as build_codex_command
 from fastapi.testclient import TestClient
-from twinlink_core.providers.claude_code import build_task_command as build_claude_command
-from twinlink_core.providers.codex import build_task_command as build_codex_command
 
 
 def test_list_providers_includes_mock(client: TestClient, auth_headers: dict[str, str]) -> None:

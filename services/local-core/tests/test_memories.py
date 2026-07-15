@@ -54,9 +54,9 @@ def test_delete_memory_marks_deleted_and_hides_from_list(
 def test_delete_memory_outdates_clone_and_context_excludes_deleted_content(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
+    from enishi_core.database import get_session
+    from enishi_core.models import AuditLog, CloneAgent
     from sqlalchemy import select
-    from twinlink_core.database import get_session
-    from twinlink_core.models import AuditLog, CloneAgent
 
     user_id = _create_user(client, auth_headers)
     created = client.post(
@@ -126,8 +126,8 @@ def test_invalid_memory_type_returns_422(
 def test_exportable_memories_excludes_secret(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
-    from twinlink_core.database import get_session
-    from twinlink_core.services.memories import exportable_memories
+    from enishi_core.database import get_session
+    from enishi_core.services.memories import exportable_memories
 
     user_id = _create_user(client, auth_headers)
     client.post(

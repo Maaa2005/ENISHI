@@ -28,14 +28,14 @@ import type {
   UserUpdateParams,
 } from "../types";
 
-export class TwinLinkApiError extends Error {
+export class EnishiApiError extends Error {
   constructor(
     public readonly code: string,
     message: string,
     public readonly details: Record<string, unknown> = {},
   ) {
     super(message);
-    this.name = "TwinLinkApiError";
+    this.name = "EnishiApiError";
   }
 }
 
@@ -48,7 +48,7 @@ export class ApiClient {
   ) {}
 
   private get baseUrl(): string {
-    // Local Coreは127.0.0.1限定で待ち受ける（twinlink.md §10）
+    // Local Coreは127.0.0.1限定で待ち受ける（enishi.md §10）
     return `http://127.0.0.1:${this.connection.port}`;
   }
 
@@ -65,7 +65,7 @@ export class ApiClient {
       const body = (await response.json().catch(() => null)) as {
         error?: { code?: string; message?: string; details?: Record<string, unknown> };
       } | null;
-      throw new TwinLinkApiError(
+      throw new EnishiApiError(
         body?.error?.code ?? "UNKNOWN_ERROR",
         body?.error?.message ?? `HTTP ${response.status}`,
         body?.error?.details ?? {},

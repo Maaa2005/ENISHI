@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { TwinLinkApiError, type ApiClient } from "../services/api";
+import { EnishiApiError, type ApiClient } from "../services/api";
 import type {
   AgreementRead,
   ApprovalRead,
@@ -64,7 +64,7 @@ export const useAppStore = create<AppState>((set) => ({
       }));
       return true;
     } catch (error) {
-      const candidates = error instanceof TwinLinkApiError && Array.isArray(error.details.candidates)
+      const candidates = error instanceof EnishiApiError && Array.isArray(error.details.candidates)
         ? error.details.candidates.filter(
           (item): item is { agent_id: string; display_name: string } =>
             typeof item === "object" && item !== null &&

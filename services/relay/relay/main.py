@@ -1,4 +1,4 @@
-"""Relay Server（twinlink.md §25 Relay Serverの責務 v2）。
+"""Relay Server（enishi.md §25 Relay Serverの責務 v2）。
 
 * 配送のみを行い、本文を改変しない（署名検証は受信ノード側の責務）
 * 本人の記憶・秘密鍵を保持しない
@@ -16,7 +16,7 @@ from relay import __version__
 from relay.config import RelaySettings, get_relay_settings
 from relay.store import MailboxStore
 
-logger = logging.getLogger("twinlink.relay")
+logger = logging.getLogger("enishi.relay")
 
 
 class RelayError(Exception):

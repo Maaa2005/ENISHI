@@ -8,7 +8,7 @@ Create Date: 2026-07-12 00:01:00.000000
 from collections.abc import Sequence
 
 from alembic import op
-from twinlink_core.models import Base
+from enishi_core.models import Base
 
 revision: str = "202607120001"
 down_revision: str | None = None

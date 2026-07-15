@@ -13,8 +13,8 @@ def _create_approval(
     client: TestClient, headers: dict[str, str], user_id: str
 ) -> dict[str, object]:
     """POST /v1/approvals はAPI仕様に存在しないため、サービス層を通じて直接作成する。"""
-    from twinlink_core.database import get_session
-    from twinlink_core.services.approvals import create_approval
+    from enishi_core.database import get_session
+    from enishi_core.services.approvals import create_approval
 
     session = next(get_session())
     try:
@@ -82,8 +82,8 @@ def test_list_approvals(client: TestClient, auth_headers: dict[str, str]) -> Non
 def test_list_marks_expired_approval(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
-    from twinlink_core.database import get_session
-    from twinlink_core.services.approvals import create_approval
+    from enishi_core.database import get_session
+    from enishi_core.services.approvals import create_approval
 
     user_id = _create_user(client, auth_headers)
     session = next(get_session())
@@ -107,9 +107,9 @@ def test_list_marks_expired_approval(
 
 
 def test_approve_records_audit_log(client: TestClient, auth_headers: dict[str, str]) -> None:
+    from enishi_core.database import get_session
+    from enishi_core.models import AuditLog
     from sqlalchemy import select
-    from twinlink_core.database import get_session
-    from twinlink_core.models import AuditLog
 
     user_id = _create_user(client, auth_headers)
     approval = _create_approval(client, auth_headers, user_id)

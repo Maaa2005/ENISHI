@@ -100,8 +100,6 @@ Design notes in this repo:
 - `packages/protocol/` — AUN Protocol message schemas (JSON Schema)
 - `scripts/` — environment checks and dev helpers
 
-> Note: internal package and bundle identifiers still use the project's former codename (`twinlink_core`, etc.). The public rename to ENISHI is in progress.
-
 ## Tech stack
 
 TypeScript · React · Tauri 2 · Python · FastAPI · SQLite
@@ -134,7 +132,7 @@ npm run dev             # Vite dev server (http://localhost:5173)
 ```bash
 # Python
 cd services/local-core && uv run --group dev pytest
-uv run --group dev ruff check . && uv run --group dev mypy twinlink_core
+uv run --group dev ruff check . && uv run --group dev mypy enishi_core
 
 # TypeScript
 npm run test && npm run typecheck

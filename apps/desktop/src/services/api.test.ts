@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiClient, TwinLinkApiError } from "./api";
+import { ApiClient, EnishiApiError } from "./api";
 
 const connection = { port: 12345, token: "test-token" };
 
@@ -169,7 +169,7 @@ describe("ApiClient", () => {
     });
   });
 
-  it("エラーレスポンスをTwinLinkApiErrorへ変換する", async () => {
+  it("エラーレスポンスをEnishiApiErrorへ変換する", async () => {
     const fetchFn = vi.fn().mockImplementation(() =>
       Promise.resolve(
         jsonResponse(
@@ -180,7 +180,7 @@ describe("ApiClient", () => {
     );
     const client = new ApiClient(connection, fetchFn);
 
-    await expect(client.listUsers()).rejects.toThrowError(TwinLinkApiError);
+    await expect(client.listUsers()).rejects.toThrowError(EnishiApiError);
     await expect(client.listUsers()).rejects.toMatchObject({
       code: "LOCAL_CORE_UNAUTHORIZED",
     });

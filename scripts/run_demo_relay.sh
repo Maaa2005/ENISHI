@@ -9,7 +9,7 @@ mkdir -p "$ROOT_DIR/.tmp/demo-user-a" "$ROOT_DIR/.tmp/demo-user-b"
 agent_id_for() {
   local data_dir="$1"
   cd "$ROOT_DIR/services/local-core"
-  TWINLINK_DATA_DIR="$data_dir" uv run python -c 'from pathlib import Path; from twinlink_core.security.keys import ensure_node_keypair; import os; print(ensure_node_keypair(Path(os.environ["TWINLINK_DATA_DIR"]))[0].agent_id)'
+  ENISHI_DATA_DIR="$data_dir" uv run python -c 'from pathlib import Path; from enishi_core.security.keys import ensure_node_keypair; import os; print(ensure_node_keypair(Path(os.environ["ENISHI_DATA_DIR"]))[0].agent_id)'
 }
 
 AGENT_A="$(agent_id_for "$ROOT_DIR/.tmp/demo-user-a")"

@@ -74,7 +74,7 @@ def test_negotiation_agrees_with_valid_slot(
     assert result["status"] == "agreed"
     selected = result["result"]["selected_slot"]
 
-    from twinlink_core.services.scheduling import overlaps
+    from enishi_core.services.scheduling import overlaps
 
     for busy_item in a_busy + b_busy:
         assert not overlaps(selected, busy_item)
@@ -201,7 +201,7 @@ def test_messages_use_protocol_format(
     ).json()
     assert messages
     for message in messages:
-        assert message["protocol"] == "twinlink/0.1"
+        assert message["protocol"] == "aun/0.1"
         assert message["session_id"] == result["id"]
         assert message["intent"] == "meeting.schedule"
         assert message["requires_human_approval"] is False

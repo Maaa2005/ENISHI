@@ -2,7 +2,7 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any
 
-from twinlink_core.services import relay_worker
+from enishi_core.services import relay_worker
 
 
 class _Session:

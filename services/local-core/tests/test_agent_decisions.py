@@ -53,9 +53,9 @@ def _user_and_clone(client: TestClient, headers: dict[str, str]) -> tuple[str, s
 def test_decision_evaluator_is_deterministic_and_reason_ordered(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
-    from twinlink_core.database import get_session
-    from twinlink_core.models import CloneAgent
-    from twinlink_core.services.decision_evaluator import evaluate_meeting_schedule
+    from enishi_core.database import get_session
+    from enishi_core.models import CloneAgent
+    from enishi_core.services.decision_evaluator import evaluate_meeting_schedule
 
     _user_id, clone_id = _user_and_clone(client, auth_headers)
     session = next(get_session())
@@ -103,9 +103,9 @@ def test_decision_evaluator_is_deterministic_and_reason_ordered(
 def test_decision_uses_time_preferences_and_relationship_policy(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
-    from twinlink_core.database import get_session
-    from twinlink_core.models import CloneAgent
-    from twinlink_core.services.decision_evaluator import evaluate_meeting_schedule
+    from enishi_core.database import get_session
+    from enishi_core.models import CloneAgent
+    from enishi_core.services.decision_evaluator import evaluate_meeting_schedule
 
     _user_id, clone_id = _user_and_clone(client, auth_headers)
     session = next(get_session())
@@ -155,17 +155,17 @@ def test_remote_low_confidence_waits_for_human_and_responds_once(
     expected_message: str,
     expected_status: str,
 ) -> None:
-    from twinlink_core.database import get_session
-    from twinlink_core.models import (
+    from enishi_core.database import get_session
+    from enishi_core.models import (
         NegotiationDecision,
         NegotiationSession,
         PeerAgent,
         RelayOutbox,
     )
-    from twinlink_core.security.envelope import build_envelope
-    from twinlink_core.security.keys import ensure_node_keypair
-    from twinlink_core.services import negotiation as negotiation_service
-    from twinlink_core.services.remote_negotiation import process_inbox
+    from enishi_core.security.envelope import build_envelope
+    from enishi_core.security.keys import ensure_node_keypair
+    from enishi_core.services import negotiation as negotiation_service
+    from enishi_core.services.remote_negotiation import process_inbox
 
     _user_id, _clone_id = _user_and_clone(client, auth_headers)
     sender_identity, sender_private = ensure_node_keypair(tmp_path / "sender")
@@ -241,10 +241,10 @@ def test_remote_low_confidence_waits_for_human_and_responds_once(
     finally:
         session.close()
 
-    monkeypatch.setattr("twinlink_core.api.routes.get_relay_client", lambda: relay)
+    monkeypatch.setattr("enishi_core.api.routes.get_relay_client", lambda: relay)
     if resolution == "expire":
-        from twinlink_core.models import Approval
-        from twinlink_core.models.base import utc_now
+        from enishi_core.models import Approval
+        from enishi_core.models.base import utc_now
 
         session = next(get_session())
         try:
@@ -285,11 +285,11 @@ def test_malformed_signed_payload_is_acked_and_isolated(
     auth_headers: dict[str, str],
     tmp_path: Any,
 ) -> None:
-    from twinlink_core.database import get_session
-    from twinlink_core.models import PeerAgent
-    from twinlink_core.security.envelope import build_envelope
-    from twinlink_core.security.keys import ensure_node_keypair
-    from twinlink_core.services.remote_negotiation import process_inbox
+    from enishi_core.database import get_session
+    from enishi_core.models import PeerAgent
+    from enishi_core.security.envelope import build_envelope
+    from enishi_core.security.keys import ensure_node_keypair
+    from enishi_core.services.remote_negotiation import process_inbox
 
     _user_and_clone(client, auth_headers)
     sender_identity, sender_private = ensure_node_keypair(tmp_path / "poison-sender")
@@ -368,11 +368,11 @@ def test_disabled_delegation_does_not_auto_counter_without_common_slot(
     auth_headers: dict[str, str],
     tmp_path: Any,
 ) -> None:
-    from twinlink_core.database import get_session
-    from twinlink_core.models import NegotiationSession
-    from twinlink_core.security.envelope import build_envelope
-    from twinlink_core.security.keys import ensure_node_keypair
-    from twinlink_core.services.remote_negotiation import process_inbox
+    from enishi_core.database import get_session
+    from enishi_core.models import NegotiationSession
+    from enishi_core.security.envelope import build_envelope
+    from enishi_core.security.keys import ensure_node_keypair
+    from enishi_core.services.remote_negotiation import process_inbox
 
     user_id, _clone_id = _user_and_clone(client, auth_headers)
     assert client.put(
@@ -452,9 +452,9 @@ def test_disabled_delegation_does_not_auto_counter_without_common_slot(
 def test_outbox_retries_the_same_envelope(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
-    from twinlink_core.database import get_session
-    from twinlink_core.models import NegotiationSession, RelayOutbox
-    from twinlink_core.services.remote_negotiation import flush_outbox
+    from enishi_core.database import get_session
+    from enishi_core.models import NegotiationSession, RelayOutbox
+    from enishi_core.services.remote_negotiation import flush_outbox
 
     _user_id, clone_id = _user_and_clone(client, auth_headers)
     session = next(get_session())
@@ -494,9 +494,9 @@ def test_outbox_retries_the_same_envelope(
 def test_outbox_preserves_message_order_after_failure(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
-    from twinlink_core.database import get_session
-    from twinlink_core.models import NegotiationSession, RelayOutbox
-    from twinlink_core.services.remote_negotiation import flush_outbox
+    from enishi_core.database import get_session
+    from enishi_core.models import NegotiationSession, RelayOutbox
+    from enishi_core.services.remote_negotiation import flush_outbox
 
     _user_id, clone_id = _user_and_clone(client, auth_headers)
     session = next(get_session())
