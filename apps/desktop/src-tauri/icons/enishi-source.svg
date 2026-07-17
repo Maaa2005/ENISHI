@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="background" cx="34%" cy="22%" r="96%">
+      <stop offset="0" stop-color="#665cff"/>
+      <stop offset="0.48" stop-color="#4138c9"/>
+      <stop offset="1" stop-color="#17134f"/>
+    </radialGradient>
+    <linearGradient id="pearl" x1="190" y1="210" x2="730" y2="810">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.52" stop-color="#d9dcff"/>
+      <stop offset="1" stop-color="#a9afff"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="830" y1="250" x2="270" y2="800">
+      <stop offset="0" stop-color="#fff1b8"/>
+      <stop offset="0.5" stop-color="#f2bd58"/>
+      <stop offset="1" stop-color="#d98438"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="26" stdDeviation="28" flood-color="#090628" flood-opacity="0.42"/>
+    </filter>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="20"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#background)"/>
+  <circle cx="248" cy="210" r="250" fill="#8d86ff" opacity="0.12" filter="url(#glow)"/>
+  <circle cx="824" cy="830" r="260" fill="#ffb44f" opacity="0.08" filter="url(#glow)"/>
+
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" filter="url(#shadow)">
+    <!-- Two independent paths cross and reconnect: a compact symbol for enishi. -->
+    <path
+      d="M240 516 C240 336 375 252 512 394 C649 252 784 336 784 516 C784 696 649 780 512 638 C375 780 240 696 240 516"
+      stroke="url(#pearl)"
+      stroke-width="84"
+    />
+    <path
+      d="M240 516 C240 696 375 780 512 638 C649 780 784 696 784 516 C784 336 649 252 512 394 C375 252 240 336 240 516"
+      stroke="url(#gold)"
+      stroke-width="46"
+    />
+  </g>
+
+  <!-- Clean central clasp keeps the mark readable at menu-bar scale. -->
+  <circle cx="512" cy="516" r="83" fill="#282273" stroke="#7770ec" stroke-width="8"/>
+  <circle cx="512" cy="516" r="47" fill="#f7f4ff"/>
+  <circle cx="512" cy="516" r="21" fill="#f1b954"/>
+</svg>

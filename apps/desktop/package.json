@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "tauri": "tauri",
-    "bundle:macos": "tauri build --ci --config src-tauri/tauri.bundle.conf.json --no-sign"
+    "bundle:macos": "../../scripts/build_macos_distribution.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

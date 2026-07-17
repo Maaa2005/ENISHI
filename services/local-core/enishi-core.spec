@@ -11,7 +11,7 @@ datas = [
 hiddenimports = []
 
 # database.pyはAlembicをimportlibで遅延ロードするため明示的に同梱する。
-hiddenimports += collect_submodules("alembic")
+hiddenimports += collect_submodules("alembic", filter=lambda name: ".testing" not in name)
 
 # keyringはmacOSバックエンドを実行時ロードするため、プラグイン一式を収集する。
 keyring_datas, keyring_binaries, keyring_hiddenimports = collect_all("keyring")
