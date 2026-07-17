@@ -7,6 +7,7 @@
 """
 
 import asyncio
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -47,9 +48,13 @@ def create_app() -> FastAPI:
     app = FastAPI(title="ENISHI Local Core", version=__version__, lifespan=lifespan)
     # 発表用Vite UIは別のloopback portからLocal Coreへ接続する。
     # 任意originには開かず、ローカル開発UIのoriginだけを許可する。
+    allowed_origins = ["http://127.0.0.1:5173", "http://localhost:5173"]
+    demo_origin = os.environ.get("ENISHI_ALLOWED_UI_ORIGIN")
+    if demo_origin:
+        allowed_origins.append(demo_origin)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+        allow_origins=allowed_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],

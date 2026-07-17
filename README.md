@@ -85,7 +85,7 @@ More detail is in [`docs/security.md`](docs/security.md).
 
 ## Status
 
-Under active development. The core negotiation loop, node identity, selective disclosure, the clone lifecycle, the relay, and the human-approval gate are implemented and demoable across two local nodes plus a relay. A fresh presentation scenario can be started with one command (see [`docs/demo.md`](docs/demo.md)). Remaining native packaging work is the final app icon, code signing, notarization, and distribution.
+The presentation build is complete and demoable across two local nodes plus a relay. It includes the negotiation loop, node identity, selective disclosure, clone lifecycle, project-scoped AI tasks, the human-approval gate, agreements, and a privacy-safe audit trail. A fresh isolated presentation scenario starts with one command (see [`docs/demo.md`](docs/demo.md)). Remaining work is production distribution rather than demo functionality: the final app icon, code signing, notarization, installer/update delivery, and live relay operation.
 
 Design notes in this repo:
 

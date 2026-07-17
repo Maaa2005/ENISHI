@@ -65,6 +65,47 @@ describe("ApiClient", () => {
     );
   });
 
+  it("プロジェクトとAIタスクを本人に絞って取得する", async () => {
+    const fetchFn = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse([])));
+    const client = new ApiClient(connection, fetchFn);
+
+    await client.listProjects("user 1");
+    await client.listTasks("user 1", 20);
+
+    expect(fetchFn.mock.calls[0][0]).toBe(
+      "http://127.0.0.1:12345/v1/projects?user_id=user+1",
+    );
+    expect(fetchFn.mock.calls[1][0]).toBe(
+      "http://127.0.0.1:12345/v1/tasks?limit=20&user_id=user+1",
+    );
+  });
+
+  it("createTaskはクローンと安全な操作範囲をPOSTする", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ id: "task1", status: "queued" }));
+    const client = new ApiClient(connection, fetchFn);
+
+    await client.createTask({
+      user_id: "u1",
+      clone_id: "c1",
+      project_id: "p1",
+      provider: "mock",
+      description: "テスト結果を要約する",
+      requested_operations: [],
+    });
+
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe("http://127.0.0.1:12345/v1/tasks");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({
+      user_id: "u1",
+      clone_id: "c1",
+      project_id: "p1",
+      provider: "mock",
+      description: "テスト結果を要約する",
+      requested_operations: [],
+    });
+  });
+
   it("createNegotiationは/v1/negotiationsへ構造化リクエストをPOSTする", async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ id: "n1", status: "agreed" }));
     const client = new ApiClient(connection, fetchFn);

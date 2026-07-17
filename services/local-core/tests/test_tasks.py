@@ -71,6 +71,47 @@ def test_mock_task_completes(client: TestClient, auth_headers: dict[str, str]) -
     assert body["finished_at"] is not None
 
 
+def test_list_tasks_filters_by_user_and_orders_newest_first(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    user_id, clone_id, _project_id = _setup_active_clone(client, auth_headers)
+    other_user_id, other_clone_id, _ = _setup_active_clone(client, auth_headers)
+    first = client.post(
+        "/v1/tasks",
+        json={
+            "user_id": user_id,
+            "clone_id": clone_id,
+            "provider": "mock",
+            "description": "first",
+        },
+        headers=auth_headers,
+    ).json()
+    second = client.post(
+        "/v1/tasks",
+        json={
+            "user_id": user_id,
+            "clone_id": clone_id,
+            "provider": "mock",
+            "description": "second",
+        },
+        headers=auth_headers,
+    ).json()
+    client.post(
+        "/v1/tasks",
+        json={
+            "user_id": other_user_id,
+            "clone_id": other_clone_id,
+            "provider": "mock",
+            "description": "other",
+        },
+        headers=auth_headers,
+    )
+
+    response = client.get(f"/v1/tasks?user_id={user_id}&limit=2", headers=auth_headers)
+    assert response.status_code == 200
+    assert [task["id"] for task in response.json()] == [second["id"], first["id"]]
+
+
 def test_level3_operation_forbidden(client: TestClient, auth_headers: dict[str, str]) -> None:
     user_id, clone_id, _project_id = _setup_active_clone(client, auth_headers)
     response = client.post(

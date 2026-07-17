@@ -8,6 +8,17 @@ mkdir -p "$ROOT_DIR/.tmp"
 DEMO_ROOT="${ENISHI_DEMO_ROOT:-$(mktemp -d "$ROOT_DIR/.tmp/enishi-demo.XXXXXX")}"
 export ENISHI_DEMO_ROOT="$DEMO_ROOT"
 
+pick_port() {
+  "${ENISHI_PYTHON:-$ROOT_DIR/.venv/bin/python}" -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()'
+}
+
+export RELAY_PORT="${RELAY_PORT:-$(pick_port)}"
+export ENISHI_DEMO_USER_A_PORT="${ENISHI_DEMO_USER_A_PORT:-$(pick_port)}"
+export ENISHI_DEMO_USER_B_PORT="${ENISHI_DEMO_USER_B_PORT:-$(pick_port)}"
+export ENISHI_DEMO_UI_PORT="${ENISHI_DEMO_UI_PORT:-$(pick_port)}"
+export ENISHI_RELAY_URL="http://127.0.0.1:${RELAY_PORT}"
+export ENISHI_ALLOWED_UI_ORIGIN="http://127.0.0.1:${ENISHI_DEMO_UI_PORT}"
+
 cleanup() {
   for pid in $PIDS; do
     kill "$pid" >/dev/null 2>&1 || true
@@ -39,26 +50,26 @@ PIDS="$PIDS $!"
 PIDS="$PIDS $!"
 
 echo "Demo processes started:"
-echo "  Relay  http://127.0.0.1:8870"
-echo "  User A http://127.0.0.1:8871 token demo-token-a"
-echo "  User B http://127.0.0.1:8872 token demo-token-b"
+echo "  Relay  http://127.0.0.1:${RELAY_PORT}"
+echo "  User A http://127.0.0.1:${ENISHI_DEMO_USER_A_PORT} token demo-token-a"
+echo "  User B http://127.0.0.1:${ENISHI_DEMO_USER_B_PORT} token demo-token-b"
 echo "  Data   $DEMO_ROOT"
 
-wait_for_health "Relay" "http://127.0.0.1:8870/health"
-wait_for_health "User A" "http://127.0.0.1:8871/health"
-wait_for_health "User B" "http://127.0.0.1:8872/health"
+wait_for_health "Relay" "http://127.0.0.1:${RELAY_PORT}/health"
+wait_for_health "User A" "http://127.0.0.1:${ENISHI_DEMO_USER_A_PORT}/health"
+wait_for_health "User B" "http://127.0.0.1:${ENISHI_DEMO_USER_B_PORT}/health"
 
 "${ENISHI_PYTHON:-$ROOT_DIR/.venv/bin/python}" "$ROOT_DIR/scripts/seed_demo.py"
 
 if [ "${ENISHI_DEMO_UI:-0}" = "1" ]; then
   (
     cd "$ROOT_DIR/apps/desktop"
-    VITE_CORE_PORT=8871 VITE_CORE_TOKEN=demo-token-a npm run dev -- --host 127.0.0.1
+    VITE_CORE_PORT="$ENISHI_DEMO_USER_A_PORT" VITE_CORE_TOKEN=demo-token-a npm run dev -- --host 127.0.0.1 --port "$ENISHI_DEMO_UI_PORT" --strictPort
   ) &
   PIDS="$PIDS $!"
-  wait_for_health "Demo UI" "http://127.0.0.1:5173"
+  wait_for_health "Demo UI" "http://127.0.0.1:${ENISHI_DEMO_UI_PORT}"
   echo ""
-  echo "Demo UI is ready: http://127.0.0.1:5173"
+  echo "Demo UI is ready: http://127.0.0.1:${ENISHI_DEMO_UI_PORT}"
   echo "Open it in a browser and start with the pending approval."
 fi
 wait

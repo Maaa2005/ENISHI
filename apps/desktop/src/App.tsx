@@ -9,6 +9,8 @@ import { MemoriesPage } from "./pages/MemoriesPage";
 import { MetricsPage } from "./pages/MetricsPage";
 import { NegotiationsPage } from "./pages/NegotiationsPage";
 import { PeersPage } from "./pages/PeersPage";
+import { ProjectsPage } from "./pages/ProjectsPage";
+import { TasksPage } from "./pages/TasksPage";
 import { ApiClient } from "./services/api";
 import { resolveCoreConnection } from "./services/backend";
 import { useAppStore } from "./stores/appStore";
@@ -39,18 +41,9 @@ const TABS: Array<[Tab, string, string, string]> = [
   ["clones", "クローン", "◉", "エージェント"],
   ["projects", "プロジェクト", "▱", "開発"],
   ["audit", "監査ログ", "◷", "エージェント"],
-  ["tasks", "新規タスク", "+", "開発"],
+  ["tasks", "AIタスク", "+", "開発"],
   ["metrics", "メトリクス", "⌁", "開発"],
 ];
-
-function PlaceholderPage({ title }: { title: string }) {
-  return (
-    <main className="page">
-      <header className="page-header"><p className="eyebrow">ENISHI</p><h1>{title}</h1></header>
-      <section className="empty-state"><div className="empty-icon">◇</div><h2>準備中です</h2><p>この機能は今後のアップデートで利用できるようになります。</p></section>
-    </main>
-  );
-}
 
 export function App() {
   const refresh = useAppStore((state) => state.refresh);
@@ -105,9 +98,9 @@ export function App() {
       {tab === "memories" && <MemoriesPage client={client} />}
       {tab === "metrics" && <MetricsPage client={client} />}
       {tab === "clones" && <ClonesPage client={client} />}
-      {tab === "projects" && <PlaceholderPage title="プロジェクト" />}
+      {tab === "projects" && <ProjectsPage client={client} />}
       {tab === "audit" && <AuditPage client={client} />}
-      {tab === "tasks" && <PlaceholderPage title="新規タスク" />}
+      {tab === "tasks" && <TasksPage client={client} onOpenApprovals={() => setTab("approvals")} />}
       </div>
     </div>
   );

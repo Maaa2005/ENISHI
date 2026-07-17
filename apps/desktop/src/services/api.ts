@@ -25,7 +25,10 @@ import type {
   PeerRead,
   PolicyRead,
   ProviderStatusDetail,
+  ProjectRead,
   RelayStatusRead,
+  TaskCreateParams,
+  TaskRead,
   UserRead,
   UserUpdateParams,
 } from "../types";
@@ -306,6 +309,52 @@ export class ApiClient {
     return this.request<AuditLogRead[]>(
       `/v1/audit-events?${new URLSearchParams({ limit: String(limit) }).toString()}`,
     );
+  }
+
+  listProjects(userId: string): Promise<ProjectRead[]> {
+    return this.request<ProjectRead[]>(
+      `/v1/projects?${new URLSearchParams({ user_id: userId }).toString()}`,
+    );
+  }
+
+  createProject(userId: string, name: string, rootPath: string): Promise<ProjectRead> {
+    return this.request<ProjectRead>("/v1/projects", {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId, name, root_path: rootPath }),
+    });
+  }
+
+  patchProject(
+    projectId: string,
+    params: { trusted?: boolean; permissions?: Record<string, boolean> },
+  ): Promise<ProjectRead> {
+    return this.request<ProjectRead>(`/v1/projects/${encodeURIComponent(projectId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(params),
+    });
+  }
+
+  listTasks(userId?: string, limit = 50): Promise<TaskRead[]> {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (userId) query.set("user_id", userId);
+    return this.request<TaskRead[]>(`/v1/tasks?${query.toString()}`);
+  }
+
+  createTask(params: TaskCreateParams): Promise<TaskRead> {
+    return this.request<TaskRead>("/v1/tasks", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
+
+  getTask(taskId: string): Promise<TaskRead> {
+    return this.request<TaskRead>(`/v1/tasks/${encodeURIComponent(taskId)}`);
+  }
+
+  cancelTask(taskId: string): Promise<TaskRead> {
+    return this.request<TaskRead>(`/v1/tasks/${encodeURIComponent(taskId)}/cancel`, {
+      method: "POST",
+    });
   }
 
   approveApproval(approvalId: string): Promise<ApprovalRead> {

@@ -10,7 +10,9 @@ the browser UI:
 ./scripts/run_demo_presentation.sh
 ```
 
-Open `http://127.0.0.1:5173`. The generated data is isolated in a new
+Open the `Demo UI is ready` URL printed in the terminal. The launcher chooses
+free loopback ports automatically, so an older rehearsal cannot block startup.
+The generated data is isolated in a new
 `.tmp/enishi-demo.*` directory on every run, so an earlier rehearsal cannot
 pollute the presentation. Press Ctrl-C in the terminal to stop the UI, both
 Local Cores, and the Relay.
@@ -31,10 +33,17 @@ The prepared story is:
    and peer trust through negotiation, human approval, and agreement. Point out
    that the screen receives allow-listed metadata only, never memory bodies,
    tokens, or key material.
+8. If time remains, open **Projects** and **AI tasks**. The launcher registers
+   this ENISHI checkout with restricted permissions and completes one harmless
+   mock task, demonstrating how a clone receives only project-scoped context.
 
 The first run requires the repository dependencies to be installed. After that,
 the presentation launcher uses the repository virtual environment directly and
 does not ask `uv` to rebuild the project over the network.
+
+If a rehearsal is interrupted, press Ctrl-C once and run the same command
+again. Every run uses a new data directory, so approvals and agreements from a
+previous run cannot make the presentation appear empty.
 
 ## Manual developer demo
 

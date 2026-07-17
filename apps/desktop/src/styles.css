@@ -196,6 +196,56 @@ button { cursor: default; }
 .audit-event-card > p { margin: 7px 0 0; color: #777980; font-size: 9px; }
 .audit-facts { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
 .audit-facts span { padding: 3px 6px; border-radius: 7px; color: #777980; background: #f0f0f2; font-size: 8px; }
+.header-button { margin-top: 0; }
+.project-form { display: grid; grid-template-columns: .8fr 1.6fr auto; min-height: 0; align-items: end; gap: 10px; margin-bottom: 14px; padding: 17px; }
+.project-form label, .task-compose label { display: block; margin-bottom: 6px; color: #777980; font-size: 9px; font-weight: 600; }
+.project-form input { width: 100%; }
+.project-form .primary-button { margin: 0; }
+.project-form > p { grid-column: 1 / -1; margin: 2px 0 0; color: #898b90; font-size: 9px; }
+.project-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.project-card { min-width: 0; padding: 18px; border: 1px solid rgba(0,0,0,.075); border-radius: 14px; background: rgba(255,255,255,.82); box-shadow: 0 1px 2px rgba(0,0,0,.025), 0 8px 28px rgba(0,0,0,.025); }
+.project-card > header { display: grid; grid-template-columns: 38px minmax(0,1fr) auto; align-items: center; gap: 11px; }
+.project-icon { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 10px; color: white; background: #41444a; font-size: 9px; font-weight: 700; }
+.project-card h2 { margin: 0; font-size: 13px; }
+.project-card header p { margin: 5px 0 0; overflow: hidden; color: #898b90; font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.project-trust { padding: 4px 7px; border-radius: 8px; color: #8a5500; background: #fff0ce; font-size: 8px; font-weight: 650; }
+.project-trust.trusted { color: #2f7250; background: #e6f2e9; }
+.permission-section { margin-top: 15px; }
+.permission-section > strong { display: block; margin-bottom: 7px; color: #898b90; font-size: 8px; }
+.permission-section > div { display: flex; flex-wrap: wrap; gap: 5px; }
+.permission { padding: 3px 7px; border-radius: 8px; font-size: 8px; font-weight: 600; }
+.permission.allowed { color: #397055; background: #e6f1e9; }
+.permission.denied { color: #777980; background: #ececef; }
+.project-card > footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(0,0,0,.06); }
+.project-card footer > span { color: #898b90; font-size: 8px; }
+.task-compose { min-height: 0; margin-bottom: 14px; padding: 18px; }
+.task-compose textarea { width: 100%; resize: vertical; }
+.task-options { display: grid; grid-template-columns: 1fr 1fr auto; align-items: end; gap: 10px; margin-top: 10px; }
+.task-options select { width: 100%; }
+.task-options .primary-button { margin: 0; }
+.task-safety { margin: 11px 0 0 !important; padding-top: 10px; border-top: 1px solid rgba(0,0,0,.06); color: #63756a !important; font-size: 9px !important; }
+.compact-task-empty { margin-top: 14px; }
+.task-layout { display: grid; grid-template-columns: 275px minmax(0,1fr); gap: 14px; align-items: start; }
+.task-list, .task-detail { border: 1px solid rgba(0,0,0,.075); border-radius: 14px; background: rgba(255,255,255,.82); box-shadow: 0 1px 2px rgba(0,0,0,.025), 0 8px 28px rgba(0,0,0,.025); }
+.task-list { max-height: 460px; padding: 10px; overflow-y: auto; }
+.task-item { display: grid; width: 100%; grid-template-columns: 8px minmax(0,1fr); align-items: center; gap: 9px; margin: 2px 0; padding: 11px 9px !important; border: 0 !important; background: transparent !important; box-shadow: none !important; text-align: left; }
+.task-item:hover, .task-item.selected { border-radius: 9px; background: #f0f0f2 !important; }
+.task-item strong { display: block; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.task-item p { margin: 4px 0 0; color: #898b90; font-size: 9px; }
+.task-status-dot { width: 8px; height: 8px; border-radius: 50%; background: #999ba0; }
+.task-status-dot.completed { background: #43825a; }
+.task-status-dot.failed, .task-status-dot.cancelled, .task-status-dot.expired { background: #ae554e; }
+.task-status-dot.running, .task-status-dot.queued { background: #4e6f91; }
+.task-status-dot.waiting_approval { background: #e29a2d; }
+.task-detail { padding: 21px; }
+.task-detail > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.task-detail h2 { margin: 0; font-size: 15px; line-height: 1.45; }
+.task-facts { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin: 18px 0 0; padding: 15px 0; border-top: 1px solid rgba(0,0,0,.07); border-bottom: 1px solid rgba(0,0,0,.07); }
+.task-facts dt { color: #999ba0; font-size: 8px; }
+.task-facts dd { margin: 5px 0 0; font-size: 9px; font-weight: 550; }
+.task-output { margin-top: 15px; }
+.task-output > strong { font-size: 9px; }
+.task-output pre { max-height: 230px; margin: 7px 0 0; padding: 12px; overflow: auto; border-radius: 9px; color: #55585e; background: #f5f5f7; font: 9px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
 .empty-state { margin-top: 80px; padding: 55px; border-radius: 15px; text-align: center; }
 .empty-state h2 { margin: 12px 0 5px; font-size: 16px; }
 .empty-state p { margin: 0; color: #898b90; font-size: 12px; }
@@ -273,6 +323,10 @@ button:not(.nav-item):active { background: #ececef; }
   .clone-layout { grid-template-columns: 210px minmax(0, 1fr); }
   .clone-profile, .clone-boundary { grid-template-columns: repeat(2, 1fr); }
   .audit-summary { grid-template-columns: repeat(2, 1fr); }
+  .project-grid { grid-template-columns: 1fr; }
+  .project-form { grid-template-columns: 1fr; }
+  .project-form > p { grid-column: auto; }
+  .task-layout { grid-template-columns: 220px minmax(0,1fr); }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -311,4 +365,9 @@ button:not(.nav-item):active { background: #ececef; }
   .audit-timeline::before { background: #45464a; }
   .audit-marker { border-color: #202124; }
   .audit-facts span { background: #38393d; }
+  .project-card, .task-list, .task-detail { border-color: rgba(255,255,255,.07); background: #2a2b2e; }
+  .project-card > footer, .task-facts, .task-safety { border-color: #3b3c40; }
+  .permission.denied { background: #38393d; }
+  .task-item:hover, .task-item.selected { background: #38393d !important; }
+  .task-output pre { color: #c6c7ca; background: #232427; }
 }

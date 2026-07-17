@@ -350,6 +350,23 @@ def get_task(session: Session, task_id: str) -> CodingTask:
     return task
 
 
+def list_tasks(
+    session: Session,
+    *,
+    user_id: str | None = None,
+    limit: int = 50,
+) -> list[CodingTask]:
+    """新しい順にタスク履歴を返す。必要なら本人で絞り込む。"""
+    query = select(CodingTask)
+    if user_id is not None:
+        query = query.where(CodingTask.user_id == user_id)
+    return list(
+        session.scalars(
+            query.order_by(CodingTask.created_at.desc()).limit(limit)
+        )
+    )
+
+
 def recover_interrupted_tasks(session: Session) -> int:
     """起動時に残ったrunning/cancellingタスクをfailedへ倒す（enishi.md §30）。"""
     now = utc_now()

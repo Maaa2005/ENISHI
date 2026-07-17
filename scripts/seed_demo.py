@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Any
 
 
@@ -144,9 +146,55 @@ def wait_for_pending_approval(node: Node, attempts: int = 30) -> dict[str, Any]:
     raise RuntimeError("The seeded negotiation did not reach the approval screen.")
 
 
+def seed_project_task(
+    node: Node,
+    user_id: str,
+    clone_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    repository_root = Path(__file__).resolve().parents[1]
+    project = node.request(
+        "/v1/projects",
+        method="POST",
+        body={
+            "user_id": user_id,
+            "name": "ENISHI",
+            "root_path": str(repository_root),
+        },
+    )
+    project = node.request(
+        f"/v1/projects/{project['id']}",
+        method="PATCH",
+        body={"trusted": True},
+    )
+    task = node.request(
+        "/v1/tasks",
+        method="POST",
+        body={
+            "user_id": user_id,
+            "clone_id": clone_id,
+            "project_id": project["id"],
+            "provider": "mock",
+            "description": "ENISHIのテスト結果とデモ準備状況を要約する",
+            "requested_operations": [],
+        },
+    )
+    for _ in range(30):
+        task = node.request(f"/v1/tasks/{task['id']}")
+        if task["status"] in {"completed", "failed"}:
+            break
+        time.sleep(0.1)
+    if task["status"] != "completed":
+        raise RuntimeError("The seeded coding task did not complete.")
+    return project, task
+
+
 def main() -> None:
-    user_a_node = Node("User A", 8871, "demo-token-a")
-    user_b_node = Node("User B", 8872, "demo-token-b")
+    user_a_node = Node(
+        "User A", int(os.environ.get("ENISHI_DEMO_USER_A_PORT", "8871")), "demo-token-a"
+    )
+    user_b_node = Node(
+        "User B", int(os.environ.get("ENISHI_DEMO_USER_B_PORT", "8872")), "demo-token-b"
+    )
 
     user_a = create_user(user_a_node, "中村 奨志")
     user_b = create_user(user_b_node, "佐藤先生")
@@ -165,8 +213,9 @@ def main() -> None:
         identity_a["personal_agent_id"],
         require_approval=False,
     )
-    activate_clone(user_a_node, user_a["id"])
+    clone_a = activate_clone(user_a_node, user_a["id"])
     activate_clone(user_b_node, user_b["id"])
+    project, task = seed_project_task(user_a_node, user_a["id"], clone_a["id"])
 
     connect(user_a_node, identity_b, "佐藤先生の代理AI", ["佐藤先生", "佐藤さん"])
     connect(user_b_node, identity_a, "中村さんの代理AI", ["中村さん", "中村"])
@@ -194,10 +243,12 @@ def main() -> None:
 
     print("")
     print("Presentation data is ready.")
-    print(f"  Scenario: 佐藤先生の代理AI -> 中村さんの代理AI")
+    print("  Scenario: 佐藤先生の代理AI -> 中村さんの代理AI")
     print(f"  Request:  {request_text}")
     print(f"  Session:  {negotiation['id']}")
     print(f"  Approval: {approval['id']} (pending on User A)")
+    print(f"  Project:  {project['name']} (trusted, restricted permissions)")
+    print(f"  AI task:  {task['id']} (completed with mock provider)")
     print("  Privacy:  raw calendar and private memory are not sent")
 
 

@@ -310,3 +310,47 @@ export interface AuditLogRead {
   payload: Record<string, unknown>;
   created_at: string;
 }
+
+export interface ProjectRead {
+  id: string;
+  user_id: string;
+  name: string;
+  root_path: string;
+  repository_type: string | null;
+  default_branch: string | null;
+  trusted: boolean;
+  permissions: Record<string, boolean>;
+  created_at: string;
+  last_opened_at: string | null;
+}
+
+export interface TaskRead {
+  id: string;
+  user_id: string;
+  clone_id: string;
+  project_id: string | null;
+  provider: string;
+  description: string;
+  status: string;
+  context_package_id: string | null;
+  approval_id: string | null;
+  output_lines: string[];
+  result: Record<string, unknown>;
+  failure_code: string | null;
+  failure_message: string | null;
+  created_at: string;
+  queued_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  worker_id: string | null;
+  heartbeat_at: string | null;
+}
+
+export interface TaskCreateParams {
+  user_id: string;
+  clone_id: string;
+  provider: "codex" | "claude_code" | "mock";
+  description: string;
+  project_id?: string;
+  requested_operations?: string[];
+}

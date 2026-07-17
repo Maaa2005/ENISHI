@@ -22,7 +22,7 @@ export ENISHI_LOG_DIR="$DATA_DIR/logs"
 export ENISHI_LOCAL_TOKEN="${ENISHI_LOCAL_TOKEN:-demo-token-b}"
 export ENISHI_RELAY_URL="${ENISHI_RELAY_URL:-http://127.0.0.1:8870}"
 export ENISHI_RELAY_TOKEN="${ENISHI_RELAY_TOKEN:-relay-token-b}"
-PORT="${ENISHI_LOCAL_PORT:-8872}"
+PORT="${ENISHI_DEMO_USER_B_PORT:-${ENISHI_LOCAL_PORT:-8872}}"
 
 echo "ENISHI Demo User B: http://127.0.0.1:${PORT} (token: ${ENISHI_LOCAL_TOKEN})"
 echo "data: ${DATA_DIR}"

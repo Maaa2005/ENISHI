@@ -419,6 +419,18 @@ def create_task(body: TaskCreate, session: Session = Depends(get_session)) -> Ta
     return TaskRead.model_validate(task)
 
 
+@v1_router.get("/tasks", response_model=list[TaskRead])
+def list_tasks(
+    user_id: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    session: Session = Depends(get_session),
+) -> list[TaskRead]:
+    return [
+        TaskRead.model_validate(task)
+        for task in task_service.list_tasks(session, user_id=user_id, limit=limit)
+    ]
+
+
 @v1_router.get("/tasks/{task_id}", response_model=TaskRead)
 def get_task(task_id: str, session: Session = Depends(get_session)) -> TaskRead:
     return TaskRead.model_validate(task_service.get_task(session, task_id))
