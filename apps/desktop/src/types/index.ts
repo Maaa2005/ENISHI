@@ -301,3 +301,12 @@ export interface ApprovalRead {
   expires_at: string;
   resolved_at: string | null;
 }
+
+export interface AuditLogRead {
+  id: string;
+  event_type: string;
+  user_id: string | null;
+  clone_id: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+}

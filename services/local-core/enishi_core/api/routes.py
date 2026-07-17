@@ -4,7 +4,7 @@ import asyncio
 import json
 import secrets
 
-from fastapi import APIRouter, Depends, WebSocket
+from fastapi import APIRouter, Depends, Query, WebSocket
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -28,6 +28,7 @@ from enishi_core.schemas import (
     AgreementPatch,
     AgreementRead,
     ApprovalRead,
+    AuditLogRead,
     CloneEnsureRequest,
     CloneRead,
     ContextPackageCreate,
@@ -68,6 +69,7 @@ from enishi_core.schemas import (
 from enishi_core.security.keys import ensure_node_keypair
 from enishi_core.services import agent_requests as agent_request_service
 from enishi_core.services import approvals as approval_service
+from enishi_core.services import audit as audit_service
 from enishi_core.services import (
     clone_bootstrap,
     context_builder,
@@ -276,6 +278,24 @@ def list_approvals(
 ) -> list[ApprovalRead]:
     approvals = approval_service.list_approvals(session, user_id)
     return [ApprovalRead.model_validate(a) for a in approvals]
+
+
+@v1_router.get("/audit-events", response_model=list[AuditLogRead])
+def list_audit_events(
+    limit: int = Query(default=100, ge=1, le=200),
+    session: Session = Depends(get_session),
+) -> list[AuditLogRead]:
+    return [
+        AuditLogRead(
+            id=event.id,
+            event_type=event.event_type,
+            user_id=event.user_id,
+            clone_id=event.clone_id,
+            payload=audit_service.public_payload(dict(event.payload)),
+            created_at=event.created_at,
+        )
+        for event in audit_service.list_events(session, limit=limit)
+    ]
 
 
 @v1_router.post("/approvals/{approval_id}/approve", response_model=ApprovalRead)

@@ -31,8 +31,50 @@ def log_event(
     return entry
 
 
-def list_events(session: Session, user_id: str | None = None) -> list[AuditLog]:
+_PUBLIC_PAYLOAD_KEYS = {
+    "action_type",
+    "agent_id",
+    "agreement_id",
+    "allowed_memory_types",
+    "approval_id",
+    "code",
+    "conflicts",
+    "context_tokens",
+    "failure_code",
+    "fingerprint",
+    "has_project",
+    "intent",
+    "max_sensitivity",
+    "memory_count",
+    "memory_id",
+    "message_count",
+    "message_id",
+    "outdated_clone_ids",
+    "peer_agent_id",
+    "processed",
+    "project_id",
+    "provider",
+    "repository_type",
+    "rounds",
+    "session_id",
+    "share_schedule",
+    "share_skills",
+    "status",
+    "task_id",
+}
+
+
+def public_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """UIへ公開してよい監査メタデータだけを返す。"""
+    return {key: value for key, value in payload.items() if key in _PUBLIC_PAYLOAD_KEYS}
+
+
+def list_events(
+    session: Session, user_id: str | None = None, limit: int | None = None
+) -> list[AuditLog]:
     query = select(AuditLog).order_by(AuditLog.created_at.desc())
     if user_id is not None:
         query = query.where(AuditLog.user_id == user_id)
+    if limit is not None:
+        query = query.limit(limit)
     return list(session.scalars(query))

@@ -184,6 +184,15 @@ class ApprovalRead(BaseModel):
     resolved_at: datetime | None
 
 
+class AuditLogRead(BaseModel):
+    id: str
+    event_type: str
+    user_id: str | None
+    clone_id: str | None
+    payload: dict[str, Any]
+    created_at: datetime
+
+
 class MethodMetricSummary(BaseModel):
     method: str
     input_tokens: int

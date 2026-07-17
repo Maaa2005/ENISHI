@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AgreementsPage } from "./pages/AgreementsPage";
 import { AgentSetupPage } from "./pages/AgentSetupPage";
 import { ApprovalsPage } from "./pages/ApprovalsPage";
+import { AuditPage } from "./pages/AuditPage";
 import { ClonesPage } from "./pages/ClonesPage";
 import { HomePage } from "./pages/HomePage";
 import { MemoriesPage } from "./pages/MemoriesPage";
@@ -24,7 +25,7 @@ type Tab =
   | "metrics"
   | "clones"
   | "projects"
-  | "agents"
+  | "audit"
   | "tasks";
 
 const TABS: Array<[Tab, string, string, string]> = [
@@ -37,7 +38,7 @@ const TABS: Array<[Tab, string, string, string]> = [
   ["memories", "記憶", "▤", "エージェント"],
   ["clones", "クローン", "◉", "エージェント"],
   ["projects", "プロジェクト", "▱", "開発"],
-  ["agents", "外部エージェント", "⌘", "開発"],
+  ["audit", "監査ログ", "◷", "エージェント"],
   ["tasks", "新規タスク", "+", "開発"],
   ["metrics", "メトリクス", "⌁", "開発"],
 ];
@@ -105,7 +106,7 @@ export function App() {
       {tab === "metrics" && <MetricsPage client={client} />}
       {tab === "clones" && <ClonesPage client={client} />}
       {tab === "projects" && <PlaceholderPage title="プロジェクト" />}
-      {tab === "agents" && <PlaceholderPage title="外部エージェント" />}
+      {tab === "audit" && <AuditPage client={client} />}
       {tab === "tasks" && <PlaceholderPage title="新規タスク" />}
       </div>
     </div>

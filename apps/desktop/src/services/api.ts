@@ -4,6 +4,7 @@ import type {
   AgentRequestCreateParams,
   AnyNegotiationCreateParams,
   ApprovalRead,
+  AuditLogRead,
   CloneRead,
   CoreConnection,
   DefaultDisclosurePolicyRead,
@@ -299,6 +300,12 @@ export class ApiClient {
   listApprovals(userId?: string): Promise<ApprovalRead[]> {
     const suffix = userId ? `?${new URLSearchParams({ user_id: userId }).toString()}` : "";
     return this.request<ApprovalRead[]>(`/v1/approvals${suffix}`);
+  }
+
+  listAuditEvents(limit = 100): Promise<AuditLogRead[]> {
+    return this.request<AuditLogRead[]>(
+      `/v1/audit-events?${new URLSearchParams({ limit: String(limit) }).toString()}`,
+    );
   }
 
   approveApproval(approvalId: string): Promise<ApprovalRead> {

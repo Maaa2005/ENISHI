@@ -27,6 +27,10 @@ The prepared story is:
 6. Open **Memories** to explain that preferences, relationship rules, and
    privacy policy stay local. Open **Clones** to show the active personal
    agent's confidence, memory basis, delegation boundary, and approval gate.
+7. Finish with **Audit log** to show the verifiable sequence from clone setup
+   and peer trust through negotiation, human approval, and agreement. Point out
+   that the screen receives allow-listed metadata only, never memory bodies,
+   tokens, or key material.
 
 The first run requires the repository dependencies to be installed. After that,
 the presentation launcher uses the repository virtual environment directly and

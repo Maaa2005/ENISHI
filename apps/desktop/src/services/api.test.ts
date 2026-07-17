@@ -54,6 +54,17 @@ describe("ApiClient", () => {
     );
   });
 
+  it("listAuditEventsは件数上限をqueryへ含める", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse([]));
+    const client = new ApiClient(connection, fetchFn);
+
+    await client.listAuditEvents(50);
+
+    expect(fetchFn.mock.calls[0][0]).toBe(
+      "http://127.0.0.1:12345/v1/audit-events?limit=50",
+    );
+  });
+
   it("createNegotiationは/v1/negotiationsへ構造化リクエストをPOSTする", async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ id: "n1", status: "agreed" }));
     const client = new ApiClient(connection, fetchFn);
