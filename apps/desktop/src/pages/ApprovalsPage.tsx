@@ -80,6 +80,11 @@ export function ApprovalsPage({ client, onOpenNegotiation, onOpenAgreements }: A
   };
 
   useEffect(() => { void load(); }, [client]);
+  useEffect(() => {
+    if (!client || !error) return;
+    const timer = window.setTimeout(() => void load(), 1500);
+    return () => window.clearTimeout(timer);
+  }, [client, error]);
 
   const resolve = async (approval: ApprovalRead, action: "approve" | "reject") => {
     if (!client) return;
@@ -105,7 +110,7 @@ export function ApprovalsPage({ client, onOpenNegotiation, onOpenAgreements }: A
         <div className={`decision-count ${pendingCount ? "active" : ""}`}><strong>{pendingCount}</strong><span>判断待ち</span></div>
       </header>
 
-      {error && <p role="alert" className="alert error">Local Coreから承認情報を取得できません: {error}</p>}
+      {error && <div role="alert" className="alert error approval-load-error"><span>Local Coreから承認情報を取得できません: {error}</span><button onClick={() => void load()}>再読み込み</button></div>}
       {resolved && (
         <section className={`resolution-banner ${resolved.action === "approve" ? "success" : "rejected"}`}>
           <div><span className="resolution-icon">{resolved.action === "approve" ? "✓" : "×"}</span><div><strong>{resolved.action === "approve" ? "承認しました。AI同士の合意が成立しました" : "拒否しました。相手の代理AIへ結果を返しました"}</strong><p>{resolved.action === "approve" ? "交渉ログと保存された合意を続けて確認できます。" : "交渉ログで拒否結果を確認できます。"}</p></div></div>

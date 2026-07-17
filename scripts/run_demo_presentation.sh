@@ -4,4 +4,5 @@ set -eu
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 export ENISHI_DEMO_UI=1
+export ENISHI_DEMO_OPEN_BROWSER=1
 exec "$ROOT_DIR/scripts/run_demo_all.sh"

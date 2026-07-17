@@ -60,6 +60,7 @@ wait_for_health "User A" "http://127.0.0.1:${ENISHI_DEMO_USER_A_PORT}/health"
 wait_for_health "User B" "http://127.0.0.1:${ENISHI_DEMO_USER_B_PORT}/health"
 
 "${ENISHI_PYTHON:-$ROOT_DIR/.venv/bin/python}" "$ROOT_DIR/scripts/seed_demo.py"
+"${ENISHI_PYTHON:-$ROOT_DIR/.venv/bin/python}" "$ROOT_DIR/scripts/verify_demo.py"
 
 if [ "${ENISHI_DEMO_UI:-0}" = "1" ]; then
   (
@@ -71,5 +72,8 @@ if [ "${ENISHI_DEMO_UI:-0}" = "1" ]; then
   echo ""
   echo "Demo UI is ready: http://127.0.0.1:${ENISHI_DEMO_UI_PORT}"
   echo "Open it in a browser and start with the pending approval."
+  if [ "${ENISHI_DEMO_OPEN_BROWSER:-0}" = "1" ] && command -v open >/dev/null 2>&1; then
+    open "http://127.0.0.1:${ENISHI_DEMO_UI_PORT}"
+  fi
 fi
 wait

@@ -36,16 +36,28 @@ pub fn core_directory() -> PathBuf {
 /// 実行コマンドを構築する。シェル文字列は使わず、
 /// コマンド名と引数を配列で分離する（enishi.md §11, §23）。
 pub fn build_core_command(port: u16) -> (String, Vec<String>) {
-    let program = "uv".to_string();
-    let args = vec![
-        "run".to_string(),
-        "uvicorn".to_string(),
+    let configured_python = std::env::var("ENISHI_PYTHON").ok().map(PathBuf::from);
+    let repository_python = core_directory().join("../../.venv/bin/python");
+    let python = configured_python
+        .or_else(|| repository_python.is_file().then_some(repository_python));
+    let (program, mut args) = if let Some(python) = python {
+        (
+            python.to_string_lossy().into_owned(),
+            vec!["-m".to_string(), "uvicorn".to_string()],
+        )
+    } else {
+        (
+            "uv".to_string(),
+            vec!["run".to_string(), "uvicorn".to_string()],
+        )
+    };
+    args.extend([
         "enishi_core.main:app".to_string(),
         "--host".to_string(),
         "127.0.0.1".to_string(),
         "--port".to_string(),
         port.to_string(),
-    ];
+    ]);
     (program, args)
 }
 
@@ -86,7 +98,8 @@ mod tests {
     #[test]
     fn build_core_command_binds_loopback_only() {
         let (program, args) = build_core_command(4321);
-        assert_eq!(program, "uv");
+        assert!(program == "uv" || program.ends_with("/python"));
+        assert!(args.contains(&"uvicorn".to_string()));
         assert!(args.contains(&"127.0.0.1".to_string()));
         assert!(args.contains(&"4321".to_string()));
         // 0.0.0.0での待ち受けを禁止（enishi.md §10）

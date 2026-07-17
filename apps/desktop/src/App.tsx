@@ -12,7 +12,7 @@ import { PeersPage } from "./pages/PeersPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { TasksPage } from "./pages/TasksPage";
 import { ApiClient } from "./services/api";
-import { resolveCoreConnection } from "./services/backend";
+import { resolveCoreConnection, waitForCore } from "./services/backend";
 import { useAppStore } from "./stores/appStore";
 import "./styles.css";
 
@@ -48,22 +48,31 @@ const TABS: Array<[Tab, string, string, string]> = [
 export function App() {
   const refresh = useAppStore((state) => state.refresh);
   const [client, setClient] = useState<ApiClient | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [reconnectKey, setReconnectKey] = useState(0);
   const [tab, setTab] = useState<Tab>("home");
   const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const connection = await resolveCoreConnection();
-      if (cancelled) return;
-      const apiClient = new ApiClient(connection);
-      setClient(apiClient);
-      await refresh(apiClient);
+      setClient(null);
+      setConnectionError(null);
+      try {
+        const connection = await resolveCoreConnection();
+        const apiClient = new ApiClient(connection);
+        await waitForCore(apiClient);
+        if (cancelled) return;
+        setClient(apiClient);
+        await refresh(apiClient);
+      } catch (error) {
+        if (!cancelled) setConnectionError(error instanceof Error ? error.message : String(error));
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [refresh]);
+  }, [refresh, reconnectKey]);
 
   return (
     <div className="app-shell">
@@ -84,9 +93,10 @@ export function App() {
           </div>
         ))}
         </nav>
-        <div className="sidebar-footer"><span className={`status-dot ${client ? "online" : ""}`} /><span>{client ? "Local Core 接続済み" : "接続中…"}</span></div>
+        <div className="sidebar-footer"><span className={`status-dot ${client ? "online" : connectionError ? "offline" : ""}`} /><span>{client ? "Local Core 接続済み" : connectionError ? "接続エラー" : "Local Core 起動中…"}</span></div>
       </aside>
       <div className="content-pane">
+      {connectionError && <section className="connection-error" role="alert"><div><strong>Local Coreへ接続できません</strong><p>{connectionError}</p></div><button onClick={() => setReconnectKey((value) => value + 1)}>再接続</button></section>}
       {tab === "home" && <HomePage client={client} />}
       {tab === "agentSetup" && (
         <AgentSetupPage client={client} onOpenPeers={() => setTab("peers")} />

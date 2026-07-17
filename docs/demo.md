@@ -10,7 +10,10 @@ the browser UI:
 ./scripts/run_demo_presentation.sh
 ```
 
-Open the `Demo UI is ready` URL printed in the terminal. The launcher chooses
+The launcher opens the correct demo URL automatically. If the browser does not
+open, use the `Demo UI is ready` URL printed in the terminal. Do not reuse an
+older `localhost:5173` tab because each presentation uses a new isolated port.
+The launcher chooses
 free loopback ports automatically, so an older rehearsal cannot block startup.
 The generated data is isolated in a new
 `.tmp/enishi-demo.*` directory on every run, so an earlier rehearsal cannot
@@ -36,6 +39,11 @@ The prepared story is:
 8. If time remains, open **Projects** and **AI tasks**. The launcher registers
    this ENISHI checkout with restricted permissions and completes one harmless
    mock task, demonstrating how a clone receives only project-scoped context.
+
+Before the browser opens, the launcher checks both Local Cores, local bearer
+authentication, the pending approval, the restricted project, the completed AI
+task, and the exact CORS origin. A failed check stops startup instead of opening
+a partially working presentation.
 
 The first run requires the repository dependencies to be installed. After that,
 the presentation launcher uses the repository virtual environment directly and
