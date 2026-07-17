@@ -5,9 +5,10 @@ pub mod state;
 use state::{AppState, CoreConnection};
 
 pub fn run() {
+    // Codexが起動した限定権限のheadless Coreを止め、同じDBをUI所有Coreへ引き継ぐ。
+    process::stop_headless_core();
     let port = process::pick_free_port().expect("no free local port available");
     let token = process::generate_token();
-
     // Local Coreを起動する。失敗してもUIは表示し、画面側で未接続を示す。
     let child = match process::spawn_core(port, &token) {
         Ok(child) => Some(child),

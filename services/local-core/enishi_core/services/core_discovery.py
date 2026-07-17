@@ -50,6 +50,7 @@ def publish(settings: Settings) -> Path:
     payload = {
         "port": settings.local_port,
         "token": _mcp_token,
+        "owner": os.environ.get("ENISHI_CORE_OWNER", "standalone"),
         "pid": os.getpid(),
     }
     temporary.write_text(json.dumps(payload), encoding="utf-8")

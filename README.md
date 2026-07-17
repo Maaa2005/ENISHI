@@ -93,6 +93,8 @@ More detail is in [`docs/security.md`](docs/security.md).
 
 The presentation build is complete and demoable across two local nodes plus a relay. It includes the negotiation loop, node identity, selective disclosure, clone lifecycle, project-scoped AI tasks, the human-approval gate, agreements, and a privacy-safe audit trail. A fresh isolated presentation scenario starts with one command (see [`docs/demo.md`](docs/demo.md)). Production packaging now embeds Local Core as a self-contained macOS sidecar and includes the final ENISHI app icon, so the `.app` does not depend on a repository checkout, Python, or `uv` on the user's machine. Remaining distribution work is code signing, notarization, update delivery, and live relay operation.
 
+Codex and Claude Code can use ENISHI without opening the desktop app. The MCP control plane starts a loopback-only headless Local Core on demand, while the separate memory MCP reads and writes the second brain. Human approval, fingerprint trust, and disclosure changes remain in the desktop UI; opening it securely hands the same database from the headless Core to a UI-owned Core without publishing the UI token.
+
 Design notes in this repo:
 
 - [`docs/architecture.md`](docs/architecture.md) — component layout
@@ -124,7 +126,7 @@ cd services/local-core && uv sync --group dev # Python deps
 ./scripts/check_macos_env.sh                  # verify toolchain
 ```
 
-Run the desktop app (Tauri generates a random port + token for the Local Core and tears it down on exit):
+Run the desktop app (Tauri generates a random port + token and safely takes over from an MCP-started headless Core when needed):
 
 ```bash
 ./scripts/dev_desktop.sh

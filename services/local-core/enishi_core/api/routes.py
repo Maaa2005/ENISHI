@@ -23,6 +23,7 @@ from enishi_core.models import (
 from enishi_core.providers import get_adapter
 from enishi_core.providers.base import ProviderDetectionResult
 from enishi_core.schemas import (
+    AgentBootstrapCreate,
     AgentIdentityRead,
     AgentRequestCreate,
     AgreementPatch,
@@ -39,6 +40,8 @@ from enishi_core.schemas import (
     HealthResponse,
     IdentityCardAdd,
     IdentityCardRead,
+    LocalAgentRead,
+    LocalAgentsRead,
     MeetingPreferencesPatch,
     MeetingPreferencesRead,
     MemoryCreate,
@@ -805,6 +808,61 @@ def agent_identity(
         active_clone_id=personal.active_clone_id,
         node_id=node.node_id,
         public_key=node.public_key,
+        fingerprint=node.fingerprint,
+    )
+
+
+@v1_router.get("/agent/self", response_model=LocalAgentsRead)
+def local_agents(session: Session = Depends(get_session)) -> LocalAgentsRead:
+    agents: list[LocalAgentRead] = []
+    for user in session.scalars(select(User).order_by(User.created_at)):
+        personal = agent_request_service.ensure_personal_agent(session, user.id)
+        node = agent_request_service.ensure_device_node(session, personal)
+        agents.append(
+            LocalAgentRead(
+                user_id=user.id,
+                display_name=user.display_name,
+                timezone=user.timezone,
+                personal_agent_id=personal.id,
+                active_clone_id=personal.active_clone_id,
+                node_id=node.node_id,
+                fingerprint=node.fingerprint,
+            )
+        )
+    session.commit()
+    return LocalAgentsRead(agents=agents)
+
+
+@v1_router.post("/agent/bootstrap", response_model=LocalAgentRead, status_code=201)
+def bootstrap_local_agent(
+    body: AgentBootstrapCreate,
+    session: Session = Depends(get_session),
+) -> LocalAgentRead:
+    existing = session.scalars(select(User).order_by(User.created_at)).first()
+    if existing is not None:
+        raise EnishiError(
+            code="LOCAL_AGENT_ALREADY_CONFIGURED",
+            message="ローカル本人エージェントは既に設定済みです。",
+            status_code=409,
+            details={"user_id": existing.id},
+        )
+    user = User(
+        display_name=body.display_name,
+        timezone=body.timezone,
+        language=body.language,
+    )
+    session.add(user)
+    session.flush()
+    personal = agent_request_service.ensure_personal_agent(session, user.id)
+    node = agent_request_service.ensure_device_node(session, personal)
+    session.commit()
+    return LocalAgentRead(
+        user_id=user.id,
+        display_name=user.display_name,
+        timezone=user.timezone,
+        personal_agent_id=personal.id,
+        active_clone_id=personal.active_clone_id,
+        node_id=node.node_id,
         fingerprint=node.fingerprint,
     )
 

@@ -3,7 +3,7 @@
 from datetime import datetime, time
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class HealthResponse(BaseModel):
@@ -429,6 +429,34 @@ class AgentIdentityRead(BaseModel):
     node_id: str
     public_key: str
     fingerprint: str
+
+
+class LocalAgentRead(BaseModel):
+    user_id: str
+    display_name: str
+    timezone: str
+    personal_agent_id: str
+    active_clone_id: str | None
+    node_id: str
+    fingerprint: str
+
+
+class LocalAgentsRead(BaseModel):
+    agents: list[LocalAgentRead]
+
+
+class AgentBootstrapCreate(BaseModel):
+    display_name: str = Field(min_length=1, max_length=200)
+    timezone: str = Field(default="Asia/Tokyo", min_length=1, max_length=64)
+    language: str = Field(default="ja", min_length=1, max_length=16)
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        from enishi_core.services.scheduling import validate_timezone
+
+        validate_timezone(value)
+        return value
 
 
 class IdentityCardRead(BaseModel):

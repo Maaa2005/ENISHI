@@ -15,9 +15,13 @@ from enishi_core.errors import EnishiError
 from enishi_core.services.core_discovery import mcp_token
 
 _MCP_READ_PATH = re.compile(
-    r"^/v1/(?:peers|negotiations(?:/[^/]+(?:/messages)?)?|agent/card)$"
+    r"^/v1/(?:peers|negotiations(?:/[^/]+(?:/messages)?)?|agent/(?:card|self))$"
 )
-_MCP_WRITE_PATHS = {"/v1/agent/requests", "/v1/peers/from-card"}
+_MCP_WRITE_PATHS = {
+    "/v1/agent/bootstrap",
+    "/v1/agent/requests",
+    "/v1/peers/from-card",
+}
 
 
 def require_local_token(

@@ -8,6 +8,7 @@ from mcp.client.stdio import stdio_client
 async def test_control_plane_exposes_requests_but_not_human_authority(tmp_path) -> None:
     environment = os.environ.copy()
     environment["ENISHI_CORE_INFO_PATH"] = str(tmp_path / "not-running.json")
+    environment["ENISHI_CORE_AUTOSTART"] = "0"
     parameters = StdioServerParameters(
         command=sys.executable,
         args=["-m", "enishi_mcp.server"],
@@ -20,6 +21,8 @@ async def test_control_plane_exposes_requests_but_not_human_authority(tmp_path) 
             unavailable = await session.call_tool("list_peers", {})
     names = {tool.name for tool in tools.tools}
     assert names == {
+        "get_status",
+        "setup_local_agent",
         "list_peers",
         "list_negotiations",
         "get_negotiation",

@@ -5,7 +5,7 @@ ENISHIは、次の順で記憶を扱う。
 1. ユーザーがObsidian VaultまたはMarkdownフォルダを接続した場合、その内容を読み取り専用の原本としてENISHIへ同期する。
 2. 外部メモリがない場合も、ENISHIのSQLite記憶を内蔵セカンドブレインとして使う。
 3. `enishi-memory` MCPはENISHIを起動せず検索・保存できる。
-4. `enishi` MCPは起動中のLocal CoreへHTTP接続し、交渉の観察と依頼を行う。承認・信頼確定・公開範囲変更はできない。
+4. `enishi` MCPは必要ならLocal Coreをheadless起動し、交渉の観察と依頼を行う。承認・信頼確定・公開範囲変更はできない。
 
 ## セットアップ
 
@@ -25,5 +25,5 @@ Codexプラグインは `plugins/enishi` にある。MCPの実行ファイル `e
 - MarkdownはローカルDBへprivateとして格納し、原本を書き換えない。
 - MCPはローカルstdio接続で、HTTPサーバーを公開しない。
 - `secret` はMCP経由で保存できない。
-- 交渉MCPはLocal Coreが生成する0600の `core.json` とMCP専用tokenを使う。Core未起動時に勝手に起動しない。
+- 交渉MCPはLocal Coreが生成する0600の `core.json` とMCP専用tokenを使う。Core未起動時はloopback限定でheadless起動し、Desktop起動時は同じDBをUI所有Coreへ安全に引き継ぐ。UI tokenはdiscoveryファイルへ保存しない。
 - 相手由来テキストは `UNTRUSTED CONTENT` と表示し、命令として扱わない。

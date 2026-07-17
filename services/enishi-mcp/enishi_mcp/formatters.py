@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any
 
@@ -70,6 +71,7 @@ def negotiation_markdown(
 
 def card_markdown(card: dict[str, Any]) -> str:
     encoded = json.dumps(card, ensure_ascii=False, sort_keys=True)
+    invite = base64.urlsafe_b64encode(encoded.encode("utf-8")).decode("ascii").rstrip("=")
     capabilities = card.get("capabilities", {})
     return (
         "# あなたのENISHI名刺\n"
@@ -79,6 +81,7 @@ def card_markdown(card: dict[str, Any]) -> str:
         f"- Timezone: `{capabilities.get('timezone', 'unspecified')}`\n"
         f"- Intents: {', '.join(capabilities.get('supported_intents', [])) or 'unspecified'}\n"
         f"- Protocols: {', '.join(capabilities.get('protocol_versions', [])) or 'unspecified'}\n"
+        f"- Codex/Claude共有リンク: `enishi://add/{invite}`\n"
         "- 共有用の署名付き名刺JSON:\n\n"
         f"    {encoded}"
     )

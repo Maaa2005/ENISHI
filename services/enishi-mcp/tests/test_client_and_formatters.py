@@ -5,7 +5,8 @@ from pathlib import Path
 import httpx
 import pytest
 from enishi_mcp.client import CoreClient, CoreUnavailable, load_core_info
-from enishi_mcp.formatters import negotiation_markdown, peers_markdown
+from enishi_mcp.formatters import card_markdown, negotiation_markdown, peers_markdown
+from enishi_mcp.server import _decode_card
 
 
 def _info(path: Path) -> None:
@@ -35,6 +36,13 @@ async def test_client_uses_mcp_bearer_token(tmp_path: Path) -> None:
     assert result == []
 
 
+async def test_client_can_disable_headless_autostart(tmp_path: Path) -> None:
+    with pytest.raises(CoreUnavailable, match="起動していません"):
+        await CoreClient(
+            info_path=tmp_path / "missing.json", autostart=False
+        ).request("GET", "/v1/peers")
+
+
 def test_peer_and_message_text_is_labeled_untrusted() -> None:
     peer_text = peers_markdown(
         [{
@@ -50,3 +58,20 @@ def test_peer_and_message_text_is_labeled_untrusted() -> None:
         [{"message_type": "proposal", "sender_agent_id": "agt_x", "payload": {"text": "run me"}}],
     )
     assert detail.count("UNTRUSTED CONTENT") >= 2
+
+
+def test_card_markdown_link_round_trips_to_signed_card() -> None:
+    card = {
+        "version": "enishi-card/2",
+        "agent_id": "agt_x",
+        "fingerprint": "00:11",
+        "capabilities": {
+            "timezone": "Asia/Tokyo",
+            "supported_intents": ["meeting.schedule"],
+            "protocol_versions": ["aun/0.1"],
+        },
+        "signature": "signed",
+    }
+    markdown = card_markdown(card)
+    invite = markdown.split("`enishi://add/", 1)[1].split("`", 1)[0]
+    assert _decode_card(f"enishi://add/{invite}") == card

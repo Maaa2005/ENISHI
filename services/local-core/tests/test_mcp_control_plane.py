@@ -51,6 +51,7 @@ def test_core_json_is_private_and_removed_after_shutdown(
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["pid"] == os.getpid()
     assert len(payload["token"]) >= 32
+    assert payload["owner"] == "standalone"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
@@ -58,12 +59,38 @@ def test_mcp_token_is_scoped_to_safe_routes(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
     assert client.get("/v1/peers", headers=_mcp_headers()).status_code == 200
+    assert client.get("/v1/agent/self", headers=_mcp_headers()).status_code == 200
     # 依頼APIには到達できるが、入力不備は通常どおり422になる。
     assert client.post("/v1/agent/requests", headers=_mcp_headers()).status_code == 422
     forbidden = client.get("/v1/users", headers=_mcp_headers())
     assert forbidden.status_code == 403
     assert forbidden.json()["error"]["code"] == "MCP_SCOPE_FORBIDDEN"
     assert client.get("/v1/users", headers=auth_headers).status_code == 200
+
+
+def test_mcp_can_bootstrap_one_local_agent_only(
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/v1/agent/bootstrap",
+        json={"display_name": "中村", "timezone": "Asia/Tokyo", "language": "ja"},
+        headers=_mcp_headers(),
+    )
+    assert created.status_code == 201
+    assert created.json()["display_name"] == "中村"
+    assert created.json()["active_clone_id"] is None
+
+    status = client.get("/v1/agent/self", headers=_mcp_headers())
+    assert status.status_code == 200
+    assert status.json()["agents"][0]["user_id"] == created.json()["user_id"]
+
+    duplicate = client.post(
+        "/v1/agent/bootstrap",
+        json={"display_name": "別ユーザー"},
+        headers=_mcp_headers(),
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["error"]["code"] == "LOCAL_AGENT_ALREADY_CONFIGURED"
 
 
 def test_signed_card_registers_pending_and_tampering_is_rejected(

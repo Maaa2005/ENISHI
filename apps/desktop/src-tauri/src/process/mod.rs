@@ -1,13 +1,69 @@
+use std::fs;
 use std::io;
 use std::net::TcpListener;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::time::Duration;
 
 use rand::distributions::Alphanumeric;
 use rand::Rng;
+use serde::Deserialize;
 
 const TOKEN_LENGTH: usize = 48;
 const KEYRING_SERVICE: &str = "com.enishi.desktop";
+
+#[derive(Deserialize)]
+struct CoreInfo {
+    port: u16,
+    pid: u32,
+    owner: String,
+}
+
+fn core_info_path() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("ENISHI_CORE_INFO_PATH") {
+        return Some(PathBuf::from(path));
+    }
+    let home = std::env::var("HOME").ok()?;
+    Some(PathBuf::from(home).join("Library/Application Support/ENISHI/core.json"))
+}
+
+pub fn load_headless_core(path: &std::path::Path) -> Option<u32> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        if fs::metadata(path).ok()?.permissions().mode() & 0o077 != 0 {
+            return None;
+        }
+    }
+    let payload: CoreInfo = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
+    if payload.pid == 0 || payload.owner != "headless" {
+        return None;
+    }
+    let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), payload.port);
+    TcpStream::connect_timeout(&address, Duration::from_millis(500)).ok()?;
+    Some(payload.pid)
+}
+
+pub fn stop_headless_core() {
+    let Some(path) = core_info_path() else {
+        return;
+    };
+    let Some(pid) = load_headless_core(&path) else {
+        return;
+    };
+    let pid_argument = pid.to_string();
+    let _ = Command::new("kill")
+        .args(["-TERM", pid_argument.as_str()])
+        .status();
+    for _ in 0..30 {
+        if !path.exists() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
 
 /// 127.0.0.1で利用可能なランダムポートを確保する（enishi.md §10）。
 pub fn pick_free_port() -> io::Result<u16> {
@@ -93,6 +149,7 @@ pub fn spawn_core(port: u16, token: &str) -> io::Result<Child> {
     command
         .env("ENISHI_LOCAL_TOKEN", token)
         .env("ENISHI_LOCAL_PORT", port.to_string())
+        .env("ENISHI_CORE_OWNER", "desktop")
         // Tauri起動時はノード署名鍵をmacOS Keychainへ保存する。
         // CLIデモはこの環境変数を持たないため0600ファイルを使う。
         .env("ENISHI_KEYRING_SERVICE", KEYRING_SERVICE)
@@ -138,5 +195,39 @@ mod tests {
     fn core_directory_points_to_local_core() {
         let dir = core_directory();
         assert!(dir.ends_with("services/local-core") || dir.to_string_lossy().contains("local-core"));
+    }
+
+    #[test]
+    fn invalid_core_info_is_not_reused() {
+        let path = std::env::temp_dir().join(format!(
+            "enishi-invalid-core-{}.json",
+            generate_token()
+        ));
+        fs::write(&path, br#"{"port":8765,"pid":0,"owner":"headless"}"#).expect("write");
+        assert!(load_headless_core(&path).is_none());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn private_live_headless_core_is_detected() {
+        #[cfg(unix)]
+        use std::os::unix::fs::PermissionsExt;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("listen");
+        let port = listener.local_addr().expect("address").port();
+        let path = std::env::temp_dir().join(format!(
+            "enishi-live-core-{}.json",
+            generate_token()
+        ));
+        fs::write(
+            &path,
+            format!(r#"{{"port":{port},"pid":{},"owner":"headless"}}"#, std::process::id()),
+        )
+        .expect("write");
+        #[cfg(unix)]
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("chmod");
+        let pid = load_headless_core(&path).expect("pid");
+        assert_eq!(pid, std::process::id());
+        let _ = fs::remove_file(path);
     }
 }
