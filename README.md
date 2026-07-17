@@ -85,7 +85,7 @@ More detail is in [`docs/security.md`](docs/security.md).
 
 ## Status
 
-The presentation build is complete and demoable across two local nodes plus a relay. It includes the negotiation loop, node identity, selective disclosure, clone lifecycle, project-scoped AI tasks, the human-approval gate, agreements, and a privacy-safe audit trail. A fresh isolated presentation scenario starts with one command (see [`docs/demo.md`](docs/demo.md)). Remaining work is production distribution rather than demo functionality: the final app icon, code signing, notarization, installer/update delivery, and live relay operation.
+The presentation build is complete and demoable across two local nodes plus a relay. It includes the negotiation loop, node identity, selective disclosure, clone lifecycle, project-scoped AI tasks, the human-approval gate, agreements, and a privacy-safe audit trail. A fresh isolated presentation scenario starts with one command (see [`docs/demo.md`](docs/demo.md)). Production packaging now embeds Local Core as a self-contained macOS sidecar, so the `.app` does not depend on a repository checkout, Python, or `uv` on the user's machine. Remaining distribution work is the final app icon, code signing, notarization, update delivery, and live relay operation.
 
 Design notes in this repo:
 
@@ -121,6 +121,14 @@ Run the desktop app (Tauri generates a random port + token for the Local Core an
 ```bash
 ./scripts/dev_desktop.sh
 ```
+
+Build an unsigned `.app` and DMG for the current Mac architecture:
+
+```bash
+npm run bundle:macos
+```
+
+The build creates a self-contained Local Core sidecar with PyInstaller. It uses Tauri's CI-safe DMG mode so packaging does not depend on scripting Finder. Signing and notarization are intentionally separate because they require Apple Developer credentials.
 
 Run the Local Core on its own for API development:
 

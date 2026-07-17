@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "npm run dev --workspace apps/desktop",
     "tauri": "npm run tauri --workspace apps/desktop",
+    "bundle:macos": "npm run bundle:macos --workspace apps/desktop",
     "test": "npm run test --workspace apps/desktop",
     "typecheck": "npm run typecheck --workspace apps/desktop",
     "lint": "npm run lint --workspace apps/desktop"

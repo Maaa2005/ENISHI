@@ -33,9 +33,29 @@ pub fn core_directory() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../services/local-core")
 }
 
+/// TauriのexternalBinは配布時にメイン実行ファイルと同じディレクトリへ
+/// ターゲットsuffixなしの名前で配置される。
+fn bundled_core_binary() -> Option<PathBuf> {
+    let configured = std::env::var("ENISHI_CORE_BINARY").ok().map(PathBuf::from);
+    if configured.as_ref().is_some_and(|path| path.is_file()) {
+        return configured;
+    }
+
+    let executable = std::env::current_exe().ok()?;
+    let candidate = executable.parent()?.join("enishi-core");
+    candidate.is_file().then_some(candidate)
+}
+
 /// 実行コマンドを構築する。シェル文字列は使わず、
 /// コマンド名と引数を配列で分離する（enishi.md §11, §23）。
 pub fn build_core_command(port: u16) -> (String, Vec<String>) {
+    if let Some(sidecar) = bundled_core_binary() {
+        return (
+            sidecar.to_string_lossy().into_owned(),
+            vec!["--port".to_string(), port.to_string()],
+        );
+    }
+
     let configured_python = std::env::var("ENISHI_PYTHON").ok().map(PathBuf::from);
     let repository_python = core_directory().join("../../.venv/bin/python");
     let python = configured_python
@@ -64,9 +84,13 @@ pub fn build_core_command(port: u16) -> (String, Vec<String>) {
 /// Local Coreを子プロセスとして起動する。
 pub fn spawn_core(port: u16, token: &str) -> io::Result<Child> {
     let (program, args) = build_core_command(port);
-    Command::new(program)
-        .args(args)
-        .current_dir(core_directory())
+    let mut command = Command::new(program);
+    command.args(args);
+    // PyInstallerサイドカーは自己完結。開発用Pythonだけパッケージdirをcwdにする。
+    if bundled_core_binary().is_none() {
+        command.current_dir(core_directory());
+    }
+    command
         .env("ENISHI_LOCAL_TOKEN", token)
         .env("ENISHI_LOCAL_PORT", port.to_string())
         // Tauri起動時はノード署名鍵をmacOS Keychainへ保存する。
@@ -98,9 +122,13 @@ mod tests {
     #[test]
     fn build_core_command_binds_loopback_only() {
         let (program, args) = build_core_command(4321);
-        assert!(program == "uv" || program.ends_with("/python"));
-        assert!(args.contains(&"uvicorn".to_string()));
-        assert!(args.contains(&"127.0.0.1".to_string()));
+        assert!(
+            program == "uv" || program.ends_with("/python") || program.ends_with("enishi-core")
+        );
+        if !program.ends_with("enishi-core") {
+            assert!(args.contains(&"uvicorn".to_string()));
+            assert!(args.contains(&"127.0.0.1".to_string()));
+        }
         assert!(args.contains(&"4321".to_string()));
         // 0.0.0.0での待ち受けを禁止（enishi.md §10）
         assert!(!args.iter().any(|a| a.contains("0.0.0.0")));

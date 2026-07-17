@@ -1,0 +1,14 @@
+{
+  "build": {
+    "beforeBuildCommand": "../../scripts/prepare_desktop_bundle.sh"
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "externalBin": ["binaries/enishi-core"],
+    "icon": ["icons/icon.png"],
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    }
+  }
+}
