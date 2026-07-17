@@ -3,6 +3,24 @@ import type { ApiClient } from "../services/api";
 import { useAppStore } from "../stores/appStore";
 import type { ApprovalRead } from "../types";
 
+type Slot = { start: string; end: string };
+
+function isSlot(value: unknown): value is Slot {
+  if (!value || typeof value !== "object") return false;
+  const slot = value as Record<string, unknown>;
+  return typeof slot.start === "string" && typeof slot.end === "string";
+}
+
+function candidateSlots(approval: ApprovalRead): Slot[] {
+  const values = Array.isArray(approval.payload.candidate_slots)
+    ? approval.payload.candidate_slots.filter(isSlot)
+    : [];
+  const selected = isSlot(approval.payload.selected_slot) ? approval.payload.selected_slot : null;
+  return selected && !values.some((slot) => slot.start === selected.start && slot.end === selected.end)
+    ? [selected, ...values]
+    : values;
+}
+
 const reasonLabels: Record<string, string> = {
   schedule_negotiation_not_delegated: "日程交渉を代理AIへ委任していません",
   clone_confidence_below_threshold: "代理AIの判断確信度が基準を下回っています",
@@ -61,7 +79,8 @@ export function ApprovalsPage({ client, onOpenNegotiation, onOpenAgreements }: A
   const [approvals, setApprovals] = useState<ApprovalRead[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
-  const [resolved, setResolved] = useState<{ sessionId: string; action: "approve" | "reject" } | null>(null);
+  const [selectedSlots, setSelectedSlots] = useState<Record<string, Slot>>({});
+  const [resolved, setResolved] = useState<{ sessionId: string; action: "approve" | "counter" | "reject" } | null>(null);
 
   const ordered = useMemo(
     () => [...approvals].sort((a, b) => Number(b.status === "pending") - Number(a.status === "pending")),
@@ -91,11 +110,17 @@ export function ApprovalsPage({ client, onOpenNegotiation, onOpenAgreements }: A
     setProcessingId(approval.id);
     setError(null);
     try {
-      if (action === "approve") await client.approveApproval(approval.id);
+      const selected = selectedSlots[approval.id]
+        ?? candidateSlots(approval)[0]
+        ?? (isSlot(approval.payload.selected_slot) ? approval.payload.selected_slot : undefined);
+      if (action === "approve") await client.approveApproval(approval.id, selected);
       else await client.rejectApproval(approval.id);
       await Promise.all([load(), refreshApp(client)]);
       const sessionId = typeof approval.payload.session_id === "string" ? approval.payload.session_id : "";
-      setResolved({ sessionId, action });
+      const original = isSlot(approval.payload.selected_slot) ? approval.payload.selected_slot : null;
+      const isAlternative = action === "approve" && selected && original
+        && (selected.start !== original.start || selected.end !== original.end);
+      setResolved({ sessionId, action: isAlternative ? "counter" : action });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -112,8 +137,8 @@ export function ApprovalsPage({ client, onOpenNegotiation, onOpenAgreements }: A
 
       {error && <div role="alert" className="alert error approval-load-error"><span>Local Coreから承認情報を取得できません: {error}</span><button onClick={() => void load()}>再読み込み</button></div>}
       {resolved && (
-        <section className={`resolution-banner ${resolved.action === "approve" ? "success" : "rejected"}`}>
-          <div><span className="resolution-icon">{resolved.action === "approve" ? "✓" : "×"}</span><div><strong>{resolved.action === "approve" ? "承認しました。AI同士の合意が成立しました" : "拒否しました。相手の代理AIへ結果を返しました"}</strong><p>{resolved.action === "approve" ? "交渉ログと保存された合意を続けて確認できます。" : "交渉ログで拒否結果を確認できます。"}</p></div></div>
+        <section className={`resolution-banner ${resolved.action === "reject" ? "rejected" : "success"}`}>
+          <div><span className="resolution-icon">{resolved.action === "reject" ? "×" : "✓"}</span><div><strong>{resolved.action === "approve" ? "承認しました。AI同士の合意が成立しました" : resolved.action === "counter" ? "選んだ代替候補を相手の代理AIへ提案しました" : "拒否しました。相手の代理AIへ結果を返しました"}</strong><p>{resolved.action === "approve" ? "交渉ログと保存された合意を続けて確認できます。" : resolved.action === "counter" ? "相手の応答を交渉ログで確認できます。" : "交渉ログで拒否結果を確認できます。"}</p></div></div>
           <div className="resolution-actions">
             {resolved.sessionId && <button onClick={() => onOpenNegotiation(resolved.sessionId)}>交渉ログを見る</button>}
             {resolved.action === "approve" && <button className="primary-button" onClick={onOpenAgreements}>成立した合意を見る</button>}
@@ -123,7 +148,12 @@ export function ApprovalsPage({ client, onOpenNegotiation, onOpenAgreements }: A
 
       {!error && ordered.length === 0 && <section className="empty-state"><div className="empty-icon">✓</div><h2>判断待ちはありません</h2><p>代理AIは委任範囲内で動作しています。</p></section>}
       <div className="approval-list">
-        {ordered.map((approval) => (
+        {ordered.map((approval) => {
+          const slots = candidateSlots(approval);
+          const selected = selectedSlots[approval.id] ?? slots[0];
+          const original = isSlot(approval.payload.selected_slot) ? approval.payload.selected_slot : null;
+          const selectingAlternative = Boolean(selected && original && (selected.start !== original.start || selected.end !== original.end));
+          return (
           <section key={approval.id} className={`approval-card ${approval.status}`}>
             <div className="approval-card-header">
               <div><p className="eyebrow">NEGOTIATION DECISION</p><h2>{approval.status === "pending" ? "この日程候補を承認しますか？" : "日程候補の判断"}</h2><p>{approval.description}</p></div>
@@ -132,14 +162,31 @@ export function ApprovalsPage({ client, onOpenNegotiation, onOpenAgreements }: A
             {approval.action_type === "negotiation_decision"
               ? <NegotiationDecisionDetails approval={approval} />
               : <pre>{JSON.stringify(approval.payload, null, 2)}</pre>}
+            {approval.status === "pending" && slots.length > 0 && (
+              <fieldset className="approval-slot-options">
+                <legend>承認または提案する候補を選択</legend>
+                {slots.map((slot) => (
+                  <label key={`${slot.start}-${slot.end}`}>
+                    <input
+                      type="radio"
+                      name={`slot-${approval.id}`}
+                      checked={selected?.start === slot.start && selected?.end === slot.end}
+                      onChange={() => setSelectedSlots((current) => ({ ...current, [approval.id]: slot }))}
+                    />
+                    <span>{formatDateTime(slot.start)}〜{new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit" }).format(new Date(slot.end))}</span>
+                    {original?.start === slot.start && original.end === slot.end && <small>代理AIの第一候補</small>}
+                  </label>
+                ))}
+              </fieldset>
+            )}
             {approval.status === "pending" && (
               <div className="approval-actions">
                 <button onClick={() => void resolve(approval, "reject")} disabled={processingId === approval.id}>拒否する</button>
-                <button className="primary-button" onClick={() => void resolve(approval, "approve")} disabled={processingId === approval.id}>{processingId === approval.id ? "処理中…" : "この候補を承認"}</button>
+                <button className="primary-button" onClick={() => void resolve(approval, "approve")} disabled={processingId === approval.id}>{processingId === approval.id ? "処理中…" : selectingAlternative ? "この代替案を相手へ提案" : "この候補を承認"}</button>
               </div>
             )}
           </section>
-        ))}
+        );})}
       </div>
     </main>
   );

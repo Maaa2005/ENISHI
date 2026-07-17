@@ -25,6 +25,7 @@ class PeerAgent(Base):
     agent_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     display_name: Mapped[str] = mapped_column(String(200))
     aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
+    capabilities: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     public_key: Mapped[str] = mapped_column(String(200))
     fingerprint: Mapped[str] = mapped_column(String(64))
     # 既存agent_idは端末ノードIDとして維持する。未設定の旧行は

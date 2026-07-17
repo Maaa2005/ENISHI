@@ -50,6 +50,7 @@ def register_peer(
     public_key: str,
     personal_agent_id: str | None = None,
     aliases: list[str] | None = None,
+    capabilities: dict[str, object] | None = None,
 ) -> PeerAgent:
     if session.get(PeerAgent, agent_id) is not None:
         raise EnishiError(
@@ -62,6 +63,7 @@ def register_peer(
         agent_id=agent_id,
         display_name=display_name,
         aliases=list(dict.fromkeys(alias.strip() for alias in (aliases or []) if alias.strip())),
+        capabilities=dict(capabilities or {}),
         public_key=public_key,
         fingerprint=_fingerprint(public_key),
         personal_agent_id=personal_agent_id,

@@ -216,6 +216,37 @@ def test_policy_apis_save_and_return_rules(
     assert loaded.json()["rules"]["file_delete"] is False
 
 
+def test_meeting_preferences_can_edit_avoid_ranges(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    user_id = _create_user(client, auth_headers)
+    clone_id = _activate_clone(client, auth_headers, user_id)
+    before = client.get(
+        f"/v1/users/{user_id}/meeting-preferences", headers=auth_headers
+    )
+    assert before.status_code == 200
+
+    updated = client.put(
+        f"/v1/users/{user_id}/meeting-preferences",
+        json={
+            "preferred_time_ranges": [{"start": "09:00", "end": "17:00"}],
+            "avoid_time_ranges": [{"start": "12:00", "end": "13:00"}],
+        },
+        headers=auth_headers,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["clone_id"] == clone_id
+    assert updated.json()["avoid_time_ranges"] == [{"start": "12:00", "end": "13:00"}]
+    assert updated.json()["version"] > before.json()["version"]
+
+    invalid = client.put(
+        f"/v1/users/{user_id}/meeting-preferences",
+        json={"avoid_time_ranges": [{"start": "25:00", "end": "26:00"}]},
+        headers=auth_headers,
+    )
+    assert invalid.status_code == 422
+
+
 def test_task_delegation_policy_blocks_coding_task(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:

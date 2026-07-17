@@ -139,11 +139,12 @@ def test_decision_uses_time_preferences_and_relationship_policy(
 
 
 @pytest.mark.parametrize(
-    ("resolution", "expected_message", "expected_status"),
+    ("resolution", "expected_message", "expected_status", "select_alternative"),
     [
-        ("approve", "ACCEPT", "agreed"),
-        ("reject", "REJECT", "failed"),
-        ("expire", "REJECT", "failed"),
+        ("approve", "ACCEPT", "agreed", False),
+        ("approve", "COUNTER", "open", True),
+        ("reject", "REJECT", "failed", False),
+        ("expire", "REJECT", "failed", False),
     ],
 )
 def test_remote_low_confidence_waits_for_human_and_responds_once(
@@ -154,6 +155,7 @@ def test_remote_low_confidence_waits_for_human_and_responds_once(
     resolution: str,
     expected_message: str,
     expected_status: str,
+    select_alternative: bool,
 ) -> None:
     from enishi_core.database import get_session
     from enishi_core.models import (
@@ -257,8 +259,18 @@ def test_remote_low_confidence_waits_for_human_and_responds_once(
         assert client.get("/v1/approvals", headers=auth_headers).status_code == 200
         assert client.post("/v1/relay/sync", headers=auth_headers).status_code == 200
     else:
+        request_body = None
+        if select_alternative:
+            approval_body = client.get(
+                "/v1/approvals", params={"user_id": _user_id}, headers=auth_headers
+            ).json()[0]
+            alternatives = approval_body["payload"]["candidate_slots"]
+            assert len(alternatives) > 1
+            request_body = {"selected_slot": alternatives[1]}
         resolved = client.post(
-            f"/v1/approvals/{approval_id}/{resolution}", headers=auth_headers
+            f"/v1/approvals/{approval_id}/{resolution}",
+            json=request_body,
+            headers=auth_headers,
         )
         assert resolved.status_code == 200
     assert [message["message_type"] for message in relay.sent] == [expected_message]

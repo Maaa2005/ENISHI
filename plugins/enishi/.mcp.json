@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "enishi": {
+      "command": "enishi-mcp"
+    },
+    "enishi-memory": {
+      "command": "enishi-memory-mcp"
+    }
+  }
+}

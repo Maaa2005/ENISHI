@@ -1,7 +1,6 @@
-from fastapi.testclient import TestClient
-
 from enishi_core.database import get_session
 from enishi_core.services.audit import log_event
+from fastapi.testclient import TestClient
 
 
 def test_audit_api_returns_only_safe_metadata(

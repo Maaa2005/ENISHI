@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from enishi_core.errors import EnishiError
 from enishi_core.models import CloneAgent, CloneStatus, User
+from enishi_core.services.audit import log_event
 
 DEFAULT_CODING_PROFILE: dict[str, Any] = {
     "preferred_languages": ["Python", "TypeScript", "Rust"],
@@ -130,3 +131,45 @@ def activate_clone(session: Session, clone_id: str) -> CloneAgent:
     session.commit()
     session.refresh(clone)
     return clone
+
+
+def get_meeting_preferences(session: Session, user_id: str) -> tuple[CloneAgent, dict[str, Any]]:
+    clone = get_active_clone(session, user_id)
+    if clone is None:
+        raise EnishiError(
+            code="CLONE_NOT_FOUND",
+            message="有効な代理AIが見つかりません。",
+            status_code=404,
+            details={"user_id": user_id},
+        )
+    raw = clone.preference_profile.get("meeting_schedule", {})
+    return clone, dict(raw) if isinstance(raw, dict) else {}
+
+
+def update_meeting_preferences(
+    session: Session,
+    user_id: str,
+    preferred_time_ranges: list[dict[str, str]],
+    avoid_time_ranges: list[dict[str, str]],
+) -> tuple[CloneAgent, dict[str, Any]]:
+    clone, _current = get_meeting_preferences(session, user_id)
+    profile = dict(clone.preference_profile)
+    meeting = dict(profile.get("meeting_schedule", {}))
+    meeting["preferred_time_ranges"] = preferred_time_ranges
+    meeting["avoid_time_ranges"] = avoid_time_ranges
+    profile["meeting_schedule"] = meeting
+    clone.preference_profile = profile
+    clone.version += 1
+    session.commit()
+    session.refresh(clone)
+    log_event(
+        session,
+        event_type="meeting_preferences_updated",
+        user_id=user_id,
+        clone_id=clone.id,
+        payload={
+            "preferred_range_count": len(preferred_time_ranges),
+            "avoid_range_count": len(avoid_time_ranges),
+        },
+    )
+    return clone, meeting

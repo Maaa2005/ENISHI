@@ -1,9 +1,9 @@
 """APIスキーマ（Pydantic）。"""
 
-from datetime import datetime
+from datetime import datetime, time
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class HealthResponse(BaseModel):
@@ -184,6 +184,10 @@ class ApprovalRead(BaseModel):
     resolved_at: datetime | None
 
 
+class ApprovalResolutionRequest(BaseModel):
+    selected_slot: dict[str, str] | None = None
+
+
 class AuditLogRead(BaseModel):
     id: str
     event_type: str
@@ -233,6 +237,27 @@ class DateRange(BaseModel):
 class TimeRange(BaseModel):
     start: str = Field(pattern=r"^\d{2}:\d{2}$")
     end: str = Field(pattern=r"^\d{2}:\d{2}$")
+
+    @model_validator(mode="after")
+    def validate_order(self) -> "TimeRange":
+        try:
+            start = time.fromisoformat(self.start)
+            end = time.fromisoformat(self.end)
+        except ValueError as exc:
+            raise ValueError("time range must contain valid times") from exc
+        if start >= end:
+            raise ValueError("time range start must be before end")
+        return self
+
+
+class MeetingPreferencesPatch(BaseModel):
+    preferred_time_ranges: list[TimeRange] = Field(default_factory=list)
+    avoid_time_ranges: list[TimeRange] = Field(default_factory=list)
+
+
+class MeetingPreferencesRead(MeetingPreferencesPatch):
+    clone_id: str
+    version: int
 
 
 class NegotiationCreate(BaseModel):
@@ -406,11 +431,29 @@ class AgentIdentityRead(BaseModel):
     fingerprint: str
 
 
+class IdentityCardRead(BaseModel):
+    version: Literal["enishi-card/1", "enishi-card/2"]
+    agent_id: str
+    personal_agent_id: str
+    public_key: str
+    fingerprint: str
+    profile: dict[str, Any]
+    capabilities: dict[str, Any] = Field(default_factory=dict)
+    relay_endpoint: str
+    issued_at: str
+    signature: str
+
+
+class IdentityCardAdd(BaseModel):
+    card: IdentityCardRead
+
+
 class PeerCreate(BaseModel):
     agent_id: str = Field(min_length=1, max_length=64)
     personal_agent_id: str | None = Field(default=None, min_length=1, max_length=64)
     display_name: str = Field(min_length=1, max_length=200)
     aliases: list[str] = Field(default_factory=list, max_length=20)
+    capabilities: dict[str, Any] = Field(default_factory=dict)
     public_key: str = Field(min_length=1, max_length=200)
 
 
@@ -421,6 +464,7 @@ class PeerRead(BaseModel):
     personal_agent_id: str | None
     display_name: str
     aliases: list[str]
+    capabilities: dict[str, Any]
     public_key: str
     fingerprint: str
     status: str
@@ -480,6 +524,25 @@ class MemorySourceSettingRead(BaseModel):
     scope: str
     created_at: datetime
     updated_at: datetime
+
+
+class MemorySourceDiscoveryRead(BaseModel):
+    source: str
+    path: str
+    label: str
+
+
+class MemorySourceSyncRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=32)
+
+
+class MemorySourceSyncRead(BaseModel):
+    source: str
+    root: str
+    created: int
+    updated: int
+    unchanged: int
+    skipped: int
 
 
 class PolicyRead(BaseModel):

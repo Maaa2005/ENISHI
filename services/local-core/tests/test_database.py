@@ -18,5 +18,5 @@ def test_file_database_initializes_through_alembic(tmp_path: Path) -> None:
             )
         }
 
-    assert version == "202607130003"
+    assert version == "202607180001"
     assert {"personal_agents", "device_nodes"} <= tables

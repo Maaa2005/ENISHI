@@ -13,6 +13,7 @@ import type {
   MemoryRead,
   MemorySourceSettingPatch,
   MemorySourceSettingRead,
+  MeetingPreferencesRead,
   MetricsSummary,
   MetricsExperimentRead,
   NegotiationMessageRead,
@@ -31,6 +32,7 @@ import type {
   TaskRead,
   UserRead,
   UserUpdateParams,
+  TimeRange,
 } from "../types";
 
 export class EnishiApiError extends Error {
@@ -105,8 +107,35 @@ export class ApiClient {
     });
   }
 
+  getMeetingPreferences(userId: string): Promise<MeetingPreferencesRead> {
+    return this.request<MeetingPreferencesRead>(
+      `/v1/users/${encodeURIComponent(userId)}/meeting-preferences`,
+    );
+  }
+
+  putMeetingPreferences(
+    userId: string,
+    preferredTimeRanges: TimeRange[],
+    avoidTimeRanges: TimeRange[],
+  ): Promise<MeetingPreferencesRead> {
+    return this.request<MeetingPreferencesRead>(
+      `/v1/users/${encodeURIComponent(userId)}/meeting-preferences`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          preferred_time_ranges: preferredTimeRanges,
+          avoid_time_ranges: avoidTimeRanges,
+        }),
+      },
+    );
+  }
+
   listMemorySources(): Promise<MemorySourceSettingRead[]> {
     return this.request<MemorySourceSettingRead[]>("/v1/memory-sources");
+  }
+
+  discoverMemorySources(): Promise<import("../types").MemorySourceDiscoveryRead[]> {
+    return this.request("/v1/memory-sources/discover");
   }
 
   listMemories(userId: string): Promise<MemoryRead[]> {
@@ -118,6 +147,13 @@ export class ApiClient {
     return this.request<MemorySourceSettingRead[]>("/v1/memory-sources", {
       method: "PUT",
       body: JSON.stringify({ sources }),
+    });
+  }
+
+  syncMemorySource(source: string, userId: string): Promise<import("../types").MemorySourceSyncRead> {
+    return this.request(`/v1/memory-sources/${encodeURIComponent(source)}/sync`, {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId }),
     });
   }
 
@@ -357,9 +393,13 @@ export class ApiClient {
     });
   }
 
-  approveApproval(approvalId: string): Promise<ApprovalRead> {
+  approveApproval(
+    approvalId: string,
+    selectedSlot?: { start: string; end: string },
+  ): Promise<ApprovalRead> {
     return this.request<ApprovalRead>(`/v1/approvals/${encodeURIComponent(approvalId)}/approve`, {
       method: "POST",
+      body: selectedSlot ? JSON.stringify({ selected_slot: selectedSlot }) : undefined,
     });
   }
 

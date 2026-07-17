@@ -47,6 +47,18 @@ export interface UserUpdateParams {
   language: string;
 }
 
+export interface TimeRange {
+  start: string;
+  end: string;
+}
+
+export interface MeetingPreferencesRead {
+  clone_id: string;
+  version: number;
+  preferred_time_ranges: TimeRange[];
+  avoid_time_ranges: TimeRange[];
+}
+
 export interface CloneRead {
   id: string;
   user_id: string;
@@ -193,6 +205,7 @@ export interface PeerRead {
   aliases: string[];
   public_key: string;
   fingerprint: string;
+  capabilities: Record<string, unknown>;
   status: "pending" | "trusted" | "blocked" | string;
   created_at: string;
   updated_at: string;
@@ -204,6 +217,7 @@ export interface PeerCreateParams {
   display_name: string;
   aliases?: string[];
   public_key: string;
+  capabilities?: Record<string, unknown>;
 }
 
 export interface AgentIdentityRead {
@@ -257,6 +271,21 @@ export interface MemorySourceSettingPatch {
   source: string;
   enabled: boolean;
   scope: string;
+}
+
+export interface MemorySourceDiscoveryRead {
+  source: string;
+  path: string;
+  label: string;
+}
+
+export interface MemorySourceSyncRead {
+  source: string;
+  root: string;
+  created: number;
+  updated: number;
+  unchanged: number;
+  skipped: number;
 }
 
 export interface PolicyRead {

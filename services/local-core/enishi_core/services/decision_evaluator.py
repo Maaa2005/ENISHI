@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime, time
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from enishi_core.models import CloneAgent
 
@@ -26,6 +27,7 @@ def evaluate_meeting_schedule(
     common_slot_count: int,
     selected_slot: dict[str, Any] | None,
     peer_personal_agent_id: str,
+    timezone: str = "UTC",
 ) -> DecisionEvaluation:
     """公開可能な集約値だけを根拠に、決定的な順序で判断する。"""
     confidence = max(0.0, min(1.0, float(clone.confidence_score)))
@@ -52,7 +54,7 @@ def evaluate_meeting_schedule(
             meeting_preferences.get("preferred_time_ranges")
         )
         avoid_ranges = _valid_time_ranges(meeting_preferences.get("avoid_time_ranges"))
-    selected_time = _slot_start_time(selected_slot)
+    selected_time = _slot_start_time(selected_slot, timezone)
     within_preferred = (
         selected_time is not None
         and (not preferred_ranges or _time_in_ranges(selected_time, preferred_ranges))
@@ -126,11 +128,16 @@ def _valid_time_ranges(value: object) -> list[dict[str, str]]:
     return valid
 
 
-def _slot_start_time(selected_slot: dict[str, Any] | None) -> time | None:
+def _slot_start_time(
+    selected_slot: dict[str, Any] | None, timezone: str = "UTC"
+) -> time | None:
     if not selected_slot or not isinstance(selected_slot.get("start"), str):
         return None
     try:
-        return datetime.fromisoformat(str(selected_slot["start"])).time()
+        value = datetime.fromisoformat(str(selected_slot["start"]))
+        if value.tzinfo is not None:
+            value = value.astimezone(ZoneInfo(timezone))
+        return value.time()
     except ValueError:
         return None
 

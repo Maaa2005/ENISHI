@@ -26,6 +26,7 @@ from enishi_core.models import (
     PeerStatus,
     PersonalAgent,
     RelayOutbox,
+    User,
 )
 from enishi_core.models.base import utc_now
 from enishi_core.security.envelope import build_envelope, verify_envelope
@@ -38,6 +39,7 @@ from enishi_core.services.decision_evaluator import evaluate_meeting_schedule
 from enishi_core.services.memories import exportable_memories
 from enishi_core.services.peers import filter_memories_for_peer, get_disclosure_policy
 from enishi_core.services.policies import delegation_enabled
+from enishi_core.services.public_reasons import to_public_reason
 from enishi_core.services.relay_client import RelayTransport
 from enishi_core.services.scheduling import (
     Slot,
@@ -48,6 +50,7 @@ from enishi_core.services.scheduling import (
 
 INTENT = "meeting.schedule"
 _OFFER_SIZE = 5
+_PROTOCOL = "aun/0.1"
 
 
 def _require_trusted_peer(session_db: Session, agent_id: str) -> PeerAgent:
@@ -60,6 +63,29 @@ def _require_trusted_peer(session_db: Session, agent_id: str) -> PeerAgent:
             details={"agent_id": agent_id},
         )
     return peer
+
+
+def _require_peer_capability(peer: PeerAgent, intent: str) -> None:
+    """v2名刺の能力宣言がある場合だけ厳格検証し、v1ピアは互換動作させる。"""
+    capabilities = peer.capabilities or {}
+    if not capabilities:
+        return
+    intents = capabilities.get("supported_intents", [])
+    protocols = capabilities.get("protocol_versions", [])
+    if intent not in intents:
+        raise EnishiError(
+            code="PEER_CAPABILITY_MISMATCH",
+            message="接続相手はこの交渉種別に対応していません。",
+            status_code=409,
+            details={"intent": intent},
+        )
+    if _PROTOCOL not in protocols:
+        raise EnishiError(
+            code="PEER_CAPABILITY_MISMATCH",
+            message="接続相手と共通のAUN Protocol versionがありません。",
+            status_code=409,
+            details={"protocol": _PROTOCOL},
+        )
 
 
 def _find_active_clone(session_db: Session, user_id: str | None = None) -> CloneAgent:
@@ -89,12 +115,15 @@ def _own_candidates(
             details={"peer_agent_id": peer_agent_id},
         )
     memories = filter_memories_for_peer(exportable_memories(session_db, user_id), policy)
-    busy = collect_busy(memories)
+    user = session_db.get(User, user_id)
+    timezone = user.timezone if user else "UTC"
+    busy = collect_busy(memories, timezone)
     return candidate_slots(
         dict(request_payload["date_range"]),
         list(request_payload["preferred_time_ranges"]),
         int(request_payload["duration_minutes"]),
         busy,
+        timezone,
     )
 
 
@@ -145,6 +174,7 @@ def start_remote_negotiation(
 ) -> NegotiationSession:
     """Relay経由で相手ノードへREQUESTとPROPOSEを送る（送信側）。"""
     peer = _require_trusted_peer(session_db, peer_agent_id)
+    _require_peer_capability(peer, INTENT)
     if not delegation_enabled(
         session_db, user_id, "schedule_negotiation", default=True
     ):
@@ -181,12 +211,14 @@ def start_remote_negotiation(
         else {}
     )
 
+    user = session_db.get(User, user_id)
     request_payload: dict[str, Any] = {
         "intent": INTENT,
         "topic": topic,
         "duration_minutes": duration_minutes,
         "date_range": date_range,
         "preferred_time_ranges": preferred_time_ranges,
+        "timezone": user.timezone if user else "UTC",
     }
     candidates = _own_candidates(session_db, user_id, request_payload, peer_agent_id)[
         :_OFFER_SIZE
@@ -302,6 +334,7 @@ def _send_reply(
     message_type: str,
     sequence: int,
     delta: dict[str, Any],
+    payload: dict[str, Any] | None = None,
 ) -> None:
     envelope = _build_reply_envelope(
         session_db,
@@ -312,6 +345,7 @@ def _send_reply(
         message_type,
         sequence,
         delta,
+        payload,
     )
     _save_message(session_db, negotiation.id, envelope)
     _enqueue_envelope(session_db, negotiation, envelope)
@@ -327,6 +361,7 @@ def _build_reply_envelope(
     message_type: str,
     sequence: int,
     delta: dict[str, Any],
+    payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     identity, private_key = ensure_node_keypair(get_settings().data_dir)
     transport_ids: dict[str, str] = {}
@@ -356,7 +391,7 @@ def _build_reply_envelope(
         intent=INTENT,
         session_version=negotiation.session_version,
         sequence=sequence,
-        payload={},
+        payload=payload or {},
         delta=delta,
         requires_human_approval=False,
         private_key=private_key,
@@ -405,6 +440,7 @@ def _record_decision(
     selected_slot: dict[str, Any] | None,
     peer_personal_agent_id: str,
 ) -> NegotiationDecision:
+    user = session_db.get(User, clone.user_id)
     evaluation = evaluate_meeting_schedule(
         clone=clone,
         delegation_enabled=delegation_enabled(
@@ -413,6 +449,7 @@ def _record_decision(
         common_slot_count=common_slot_count,
         selected_slot=selected_slot,
         peer_personal_agent_id=peer_personal_agent_id,
+        timezone=user.timezone if user else "UTC",
     )
     decision = NegotiationDecision(
         session_id=negotiation.id,
@@ -500,6 +537,7 @@ def resolve_remote_approval(
     session_db: Session,
     approval_id: str,
     target_status: str,
+    selected_slot_override: dict[str, str] | None = None,
 ) -> Approval:
     """リモート交渉承認を一度だけ解決し、応答をOutboxへ原子的に保存する。"""
     approval = session_db.get(Approval, approval_id)
@@ -551,23 +589,52 @@ def resolve_remote_approval(
         )
 
     approved = target_status == ApprovalStatus.APPROVED.value
-    proposed_action = str(approval.payload.get("proposed_action", "ACCEPT"))
-    message_type = proposed_action if approved else "REJECT"
     selected_slot = dict(approval.payload.get("selected_slot", {}))
     candidate_slots = [
         dict(slot) for slot in approval.payload.get("candidate_slots", [])
         if isinstance(slot, dict)
     ]
+    proposed_action = str(approval.payload.get("proposed_action", "ACCEPT"))
+    if approved and selected_slot_override is not None:
+        override = dict(selected_slot_override)
+        if override not in candidate_slots:
+            raise EnishiError(
+                code="INVALID_APPROVAL_SELECTION",
+                message="選択した候補は、この承認に含まれていません。",
+                status_code=422,
+                details={"approval_id": approval.id},
+            )
+        proposed_action = "ACCEPT" if override == selected_slot else "COUNTER"
+        selected_slot = override
+    message_type = proposed_action if approved else "REJECT"
     delta: dict[str, Any]
     if approved and message_type == "ACCEPT":
         delta = {"selected_slot": selected_slot}
     elif approved and message_type == "COUNTER":
-        delta = {"candidate_slots": candidate_slots[:_OFFER_SIZE]}
+        counter_slots = [selected_slot] if selected_slot else candidate_slots[:_OFFER_SIZE]
+        delta = {"candidate_slots": counter_slots}
     else:
         delta = {
             "code": "HUMAN_REJECTED"
             if target_status == "rejected"
             else "APPROVAL_EXPIRED"
+        }
+    public_payload: dict[str, Any] = {}
+    if message_type == "COUNTER":
+        public_payload = {
+            "public_reason": to_public_reason(
+                [str(code) for code in approval.payload.get("reason_codes", [])]
+            )
+        }
+    elif message_type == "REJECT":
+        public_payload = {
+            "public_reason": to_public_reason(
+                [
+                    "approval_expired"
+                    if target_status == ApprovalStatus.EXPIRED.value
+                    else "human_rejected"
+                ]
+            )
         }
     own_personal_id = negotiation.responder_agent_id or ""
     peer_personal_id = str(
@@ -588,6 +655,7 @@ def resolve_remote_approval(
         message_type,
         sequence,
         delta,
+        public_payload,
     )
     _save_message(session_db, negotiation.id, envelope)
     _enqueue_envelope(
@@ -727,7 +795,7 @@ def _handle_envelope(
                 clone,
                 decision,
                 selected_slot=common[0] if common else None,
-                candidate_slots=[] if common else own[:_OFFER_SIZE],
+                candidate_slots=own[:_OFFER_SIZE],
                 peer_node_id=sender_node,
                 peer_personal_agent_id=sender,
             )
@@ -748,6 +816,7 @@ def _handle_envelope(
                 session_db, relay, negotiation, sender_personal_id, sender, sender_node,
                 "COUNTER", sequence + 1,
                 {"candidate_slots": own[:_OFFER_SIZE]},
+                {"public_reason": to_public_reason(decision.reason_codes)},
             )
         else:
             _send_reply(
@@ -766,7 +835,10 @@ def _handle_envelope(
         _create_remote_agreement(session_db, negotiation, negotiation.result)
     elif message_type in ("REJECT", "ERROR"):
         negotiation.status = NegotiationStatus.FAILED.value
-        negotiation.result = {"code": str(envelope.get("delta", {}).get("code", message_type))}
+        negotiation.result = {
+            "code": str(envelope.get("delta", {}).get("code", message_type)),
+            "public_reason": str(envelope.get("payload", {}).get("public_reason", "")),
+        }
 
     session_db.commit()
     return {"message_id": message_id, "action": "processed"}

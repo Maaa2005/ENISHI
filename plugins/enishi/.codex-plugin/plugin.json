@@ -1,0 +1,23 @@
+{
+  "name": "enishi",
+  "version": "0.1.0",
+  "description": "ENISHIの代理AI交渉とローカル／外部メモリをCodexから利用する",
+  "author": {
+    "name": "ENISHI"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Enishi",
+    "shortDescription": "ENISHIの交渉と記憶をCodexから使う",
+    "longDescription": "Local Coreを安全なMCP操縦面から観察・依頼し、内蔵メモリと接続済みObsidian/Markdownメモリも利用します。",
+    "developerName": "ENISHI",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": [
+      "ENISHIの接続相手と進行中の交渉を確認して。",
+      "ENISHIからこの作業に関連する記憶を検索して。",
+      "確定した判断をENISHIに保存して。"
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

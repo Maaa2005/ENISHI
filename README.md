@@ -51,7 +51,13 @@ Each user runs a local node. Two nodes talk through a relay that only forwards m
                minimal logging)
 ```
 
-The desktop app (Tauri 2 + React + TypeScript) is just the UI. The real work happens in the **Local Core**, a FastAPI service that binds to `127.0.0.1` only. Tauri launches it as a child process with a random port and a random bearer token per session, and kills it on exit so no orphan process is left listening. Every `/v1/*` route requires that token.
+Codex and Claude Code can also use ENISHI as the primary control surface:
+
+```text
+Codex / Claude Code ──stdio──► enishi-mcp ──HTTP + scoped token──► Local Core
+```
+
+The real work happens in the **Local Core**, a FastAPI service that binds to `127.0.0.1` only. Tauri launches it as a child process with a random port and a random UI bearer token per session. Local Core also writes a private `core.json` discovery file for `enishi-mcp`, using a separate restricted token. MCP may observe negotiations and create requests, but cannot approve actions, trust peers, or change disclosure policy. The desktop UI remains the human approval and audit surface.
 
 ## The AUN Protocol
 
@@ -93,11 +99,13 @@ Design notes in this repo:
 - [`docs/protocol.md`](docs/protocol.md) — the AUN Protocol
 - [`docs/security.md`](docs/security.md) — security posture
 - [`docs/clone-memory.md`](docs/clone-memory.md) — clones and memory
+- [`docs/mcp-control-plane.md`](docs/mcp-control-plane.md) — Codex / Claude Code control plane
 
 ## Repository layout
 
 - `apps/desktop/` — Tauri 2 + React + TypeScript desktop app
 - `services/local-core/` — FastAPI Local Core (127.0.0.1 only, bearer auth required)
+- `services/enishi-mcp/` — thin stdio MCP-to-Local-Core control plane
 - `services/relay/` — forward-only relay server
 - `packages/protocol/` — AUN Protocol message schemas (JSON Schema)
 - `scripts/` — environment checks and dev helpers
@@ -122,6 +130,12 @@ Run the desktop app (Tauri generates a random port + token for the Local Core an
 ./scripts/dev_desktop.sh
 ```
 
+Register ENISHI for Codex and Claude Code:
+
+```bash
+./scripts/install-agent-integrations.sh
+```
+
 Build an unsigned `.app` and DMG for the current Mac architecture:
 
 ```bash
@@ -141,8 +155,9 @@ npm run dev             # Vite dev server (http://localhost:5173)
 
 ```bash
 # Python
-cd services/local-core && uv run --group dev pytest
-uv run --group dev ruff check . && uv run --group dev mypy enishi_core
+uv run --group dev pytest services/local-core/tests services/enishi-mcp/tests
+uv run --group dev ruff check services/local-core/enishi_core services/enishi-mcp
+uv run --group dev mypy services/local-core/enishi_core services/enishi-mcp/enishi_mcp
 
 # TypeScript
 npm run test && npm run typecheck

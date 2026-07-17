@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["services/local-core", "services/relay"]
+members = ["services/local-core", "services/relay", "services/enishi-mcp"]
 
 [tool.ruff]
 line-length = 100

@@ -238,6 +238,7 @@ def test_task_request_counter_when_within_counter_policy(
         f"/v1/negotiations/{negotiation['id']}/messages", headers=auth_headers
     )
     assert [m["message_type"] for m in messages.json()] == ["REQUEST", "COUNTER"]
+    assert messages.json()[-1]["payload"] == {"public_reason": "constraint_violation"}
 
 
 def test_task_request_threshold_exceeded_escalates_to_human_approval(
@@ -541,7 +542,7 @@ def test_disclosure_policy_affects_remote_candidate_calculation_and_payload(
     finally:
         session.close()
     first_candidates = relay_without_schedule.sent[1]["delta"]["candidate_slots"]
-    assert first_candidates[0]["start"] == "2026-07-13T13:00"
+    assert first_candidates[0]["start"] == "2026-07-13T13:00+09:00"
 
     response = client.put(
         "/v1/peers/agt_schedule_peer/disclosure",
@@ -571,5 +572,51 @@ def test_disclosure_policy_affects_remote_candidate_calculation_and_payload(
     finally:
         session.close()
     second_candidates = relay_with_schedule.sent[1]["delta"]["candidate_slots"]
-    assert second_candidates[0]["start"] == "2026-07-13T13:30"
+    assert second_candidates[0]["start"] == "2026-07-13T13:30+09:00"
     assert "公開可能busy" not in str(relay_with_schedule.sent)
+
+
+def test_remote_negotiation_rejects_incompatible_v2_peer(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    from enishi_core.database import get_session
+    from enishi_core.errors import EnishiError
+    from enishi_core.services.remote_negotiation import start_remote_negotiation
+
+    user_id = _create_user(client, auth_headers, "中村")
+    _activate_clone(client, auth_headers, user_id)
+    created = client.post(
+        "/v1/peers",
+        json={
+            "agent_id": "agt_incompatible",
+            "display_name": "非対応AI",
+            "public_key": _PUBLIC_KEY,
+            "capabilities": {
+                "timezone": "Asia/Tokyo",
+                "supported_intents": ["task.request"],
+                "protocol_versions": ["aun/0.1"],
+            },
+        },
+        headers=auth_headers,
+    )
+    assert created.status_code == 201
+    assert client.post(
+        "/v1/peers/agt_incompatible/trust", headers=auth_headers
+    ).status_code == 200
+
+    session = next(get_session())
+    try:
+        with pytest.raises(EnishiError) as exc:
+            start_remote_negotiation(
+                session,
+                _FakeRelay(),
+                user_id=user_id,
+                peer_agent_id="agt_incompatible",
+                topic="打ち合わせ",
+                duration_minutes=30,
+                date_range={"start": "2026-07-13", "end": "2026-07-13"},
+                preferred_time_ranges=[{"start": "13:00", "end": "14:00"}],
+            )
+        assert exc.value.code == "PEER_CAPABILITY_MISMATCH"
+    finally:
+        session.close()

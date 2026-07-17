@@ -57,7 +57,14 @@
       "minimum": 1
     },
     "payload": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "public_reason": {
+          "type": "string",
+          "enum": ["no_common_slot", "constraint_violation", "policy_declined"]
+        }
+      },
+      "additionalProperties": true
     },
     "delta": {
       "type": "object"

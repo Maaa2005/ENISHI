@@ -10,6 +10,7 @@ from enishi_core.providers.base import (
     ProviderDetectionResult,
 )
 from enishi_core.providers.cli_runner import run_cli, run_cli_async
+from enishi_core.providers.context_file import materialize_context
 from enishi_core.services.environment import detect_provider
 
 
@@ -76,9 +77,9 @@ class CodexCliAdapter:
         context_package: CloneContextPackage,
         project_root: Path,
     ) -> CodingTaskResult:
-        context_path = project_root / f".enishi-context-{context_package.id}.json"
-        args = build_task_command(task_description, context_path, project_root)
-        return_code, output = await run_cli_async(args, cwd=project_root, timeout=600)
+        with materialize_context(context_package, project_root) as context_path:
+            args = build_task_command(task_description, context_path, project_root)
+            return_code, output = await run_cli_async(args, cwd=project_root, timeout=600)
         lines = [line for line in output.splitlines() if line]
         status = "completed" if return_code == 0 else "failed"
         return CodingTaskResult(status=status, output_lines=lines, detail=f"exit={return_code}")

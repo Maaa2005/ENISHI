@@ -19,6 +19,7 @@ from enishi_core.api.routes import health_router, v1_router
 from enishi_core.config import get_settings
 from enishi_core.database import get_session, init_database
 from enishi_core.errors import register_error_handlers
+from enishi_core.services import core_discovery
 from enishi_core.services.relay_worker import worker_loop as relay_worker_loop
 from enishi_core.services.tasks import recover_interrupted_tasks, worker_loop
 
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         session.close()
 
+    core_discovery.publish(settings)
     stop_event = asyncio.Event()
     worker = asyncio.create_task(worker_loop(stop_event))
     relay_worker = asyncio.create_task(relay_worker_loop(stop_event))
@@ -41,7 +43,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         stop_event.set()
-        await asyncio.gather(worker, relay_worker)
+        try:
+            await asyncio.gather(worker, relay_worker)
+        finally:
+            core_discovery.unpublish(settings)
 
 
 def create_app() -> FastAPI:

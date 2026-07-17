@@ -212,6 +212,37 @@ describe("ApiClient", () => {
     expect(fetchFn.mock.calls[3][0]).toBe("http://127.0.0.1:12345/v1/policies/approval-rules");
   });
 
+  it("日程の希望と避けたい時間帯をPUTする", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ clone_id: "c1", version: 2 }));
+    const client = new ApiClient(connection, fetchFn);
+
+    await client.putMeetingPreferences(
+      "u1",
+      [{ start: "09:00", end: "17:00" }],
+      [{ start: "12:00", end: "13:00" }],
+    );
+
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe("http://127.0.0.1:12345/v1/users/u1/meeting-preferences");
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body as string)).toEqual({
+      preferred_time_ranges: [{ start: "09:00", end: "17:00" }],
+      avoid_time_ranges: [{ start: "12:00", end: "13:00" }],
+    });
+  });
+
+  it("承認時に選んだ代替候補を送る", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ id: "a1", status: "approved" }));
+    const client = new ApiClient(connection, fetchFn);
+    const selected = { start: "2026-07-20T13:30+09:00", end: "2026-07-20T14:00+09:00" };
+
+    await client.approveApproval("a1", selected);
+
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe("http://127.0.0.1:12345/v1/approvals/a1/approve");
+    expect(JSON.parse(init.body as string)).toEqual({ selected_slot: selected });
+  });
+
   it("runMetricsExperimentは条件をPOSTする", async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ id: "experiment_1" }));
     const client = new ApiClient(connection, fetchFn);

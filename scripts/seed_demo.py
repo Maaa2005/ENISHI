@@ -197,7 +197,7 @@ def main() -> None:
     )
 
     user_a = create_user(user_a_node, "中村 奨志")
-    user_b = create_user(user_b_node, "佐藤先生")
+    user_b = create_user(user_b_node, "水野先生")
     identity_a = user_a_node.request(f"/v1/agent/identity?user_id={user_a['id']}")
     identity_b = user_b_node.request(f"/v1/agent/identity?user_id={user_b['id']}")
 
@@ -217,7 +217,7 @@ def main() -> None:
     activate_clone(user_b_node, user_b["id"])
     project, task = seed_project_task(user_a_node, user_a["id"], clone_a["id"])
 
-    connect(user_a_node, identity_b, "佐藤先生の代理AI", ["佐藤先生", "佐藤さん"])
+    connect(user_a_node, identity_b, "水野先生の代理AI", ["水野先生", "水野さん"])
     connect(user_b_node, identity_a, "中村さんの代理AI", ["中村さん", "中村"])
     for node, user in ((user_a_node, user_a), (user_b_node, user_b)):
         node.request(
@@ -243,7 +243,7 @@ def main() -> None:
 
     print("")
     print("Presentation data is ready.")
-    print("  Scenario: 佐藤先生の代理AI -> 中村さんの代理AI")
+    print("  Scenario: 水野先生の代理AI -> 中村さんの代理AI")
     print(f"  Request:  {request_text}")
     print(f"  Session:  {negotiation['id']}")
     print(f"  Approval: {approval['id']} (pending on User A)")

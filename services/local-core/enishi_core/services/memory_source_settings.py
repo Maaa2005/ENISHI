@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from enishi_core.models import MemorySourceSetting
+from enishi_core.services.external_memory import validate_markdown_root
 
 LOCAL_SOURCE = "memories"
 KNOWN_SOURCES = [
@@ -13,13 +14,22 @@ KNOWN_SOURCES = [
     "calendar",
     "github",
     "obsidian",
+    "markdown_folder",
     "notion",
     "google_drive",
 ]
 
 
-def _is_connected(source: str) -> bool:
-    return source == LOCAL_SOURCE
+def _is_connected(source: str, scope: str = "") -> bool:
+    if source == LOCAL_SOURCE:
+        return True
+    if source in {"obsidian", "markdown_folder"} and scope:
+        try:
+            validate_markdown_root(scope)
+        except Exception:
+            return False
+        return True
+    return False
 
 
 def _default_setting(source: str) -> MemorySourceSetting:
@@ -40,7 +50,7 @@ def list_settings(session: Session) -> list[MemorySourceSetting]:
             session.add(setting)
             existing[source] = setting
     for setting in existing.values():
-        setting.connected = _is_connected(setting.source)
+        setting.connected = _is_connected(setting.source, setting.scope)
         if not setting.connected:
             setting.enabled = False
     session.commit()
@@ -59,9 +69,9 @@ def put_settings(
             setting = _default_setting(source)
             session.add(setting)
             existing[source] = setting
-        setting.connected = _is_connected(source)
+        setting.scope = str(item.get("scope", setting.scope or ""))
+        setting.connected = _is_connected(source, setting.scope)
         requested_enabled = bool(item.get("enabled", setting.enabled))
         setting.enabled = requested_enabled if setting.connected else False
-        setting.scope = str(item.get("scope", setting.scope or ""))
     session.commit()
     return [existing[source] for source in sorted(existing)]

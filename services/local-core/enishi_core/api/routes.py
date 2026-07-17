@@ -28,6 +28,7 @@ from enishi_core.schemas import (
     AgreementPatch,
     AgreementRead,
     ApprovalRead,
+    ApprovalResolutionRequest,
     AuditLogRead,
     CloneEnsureRequest,
     CloneRead,
@@ -36,10 +37,17 @@ from enishi_core.schemas import (
     DefaultDisclosurePolicyRead,
     EnvironmentInfo,
     HealthResponse,
+    IdentityCardAdd,
+    IdentityCardRead,
+    MeetingPreferencesPatch,
+    MeetingPreferencesRead,
     MemoryCreate,
     MemoryRead,
+    MemorySourceDiscoveryRead,
     MemorySourceSettingRead,
     MemorySourceSettingsUpdate,
+    MemorySourceSyncRead,
+    MemorySourceSyncRequest,
     MetricsExperimentCreate,
     MetricsExperimentRead,
     MetricsSummary,
@@ -77,6 +85,8 @@ from enishi_core.services import (
     remote_negotiation,
 )
 from enishi_core.services import clones as clone_service
+from enishi_core.services import external_memory as external_memory_service
+from enishi_core.services import identity_cards as identity_card_service
 from enishi_core.services import memories as memory_service
 from enishi_core.services import memory_source_settings as memory_source_service
 from enishi_core.services import metrics as metrics_service
@@ -182,6 +192,43 @@ def rebuild_clone(clone_id: str, session: Session = Depends(get_session)) -> Clo
     return CloneRead.model_validate(clone_bootstrap.rebuild_clone(session, clone_id))
 
 
+@v1_router.get(
+    "/users/{user_id}/meeting-preferences", response_model=MeetingPreferencesRead
+)
+def get_meeting_preferences(
+    user_id: str, session: Session = Depends(get_session)
+) -> MeetingPreferencesRead:
+    clone, preferences = clone_service.get_meeting_preferences(session, user_id)
+    return MeetingPreferencesRead(
+        clone_id=clone.id,
+        version=clone.version,
+        preferred_time_ranges=preferences.get("preferred_time_ranges", []),
+        avoid_time_ranges=preferences.get("avoid_time_ranges", []),
+    )
+
+
+@v1_router.put(
+    "/users/{user_id}/meeting-preferences", response_model=MeetingPreferencesRead
+)
+def put_meeting_preferences(
+    user_id: str,
+    body: MeetingPreferencesPatch,
+    session: Session = Depends(get_session),
+) -> MeetingPreferencesRead:
+    clone, preferences = clone_service.update_meeting_preferences(
+        session,
+        user_id,
+        [item.model_dump() for item in body.preferred_time_ranges],
+        [item.model_dump() for item in body.avoid_time_ranges],
+    )
+    return MeetingPreferencesRead(
+        clone_id=clone.id,
+        version=clone.version,
+        preferred_time_ranges=preferences["preferred_time_ranges"],
+        avoid_time_ranges=preferences["avoid_time_ranges"],
+    )
+
+
 @v1_router.get("/memories", response_model=list[MemoryRead])
 def list_memories(user_id: str, session: Session = Depends(get_session)) -> list[MemoryRead]:
     return [MemoryRead.model_validate(m) for m in memory_service.list_memories(session, user_id)]
@@ -208,6 +255,41 @@ def put_memory_sources(
             session, [item.model_dump() for item in body.sources]
         )
     ]
+
+
+@v1_router.get("/memory-sources/discover", response_model=list[MemorySourceDiscoveryRead])
+def discover_memory_sources() -> list[MemorySourceDiscoveryRead]:
+    return [
+        MemorySourceDiscoveryRead.model_validate(item)
+        for item in external_memory_service.discover_markdown_sources()
+    ]
+
+
+@v1_router.post("/memory-sources/{source}/sync", response_model=MemorySourceSyncRead)
+def sync_memory_source(
+    source: str,
+    body: MemorySourceSyncRequest,
+    session: Session = Depends(get_session),
+) -> MemorySourceSyncRead:
+    if source not in {"obsidian", "markdown_folder"}:
+        raise EnishiError(
+            code="MEMORY_SOURCE_UNSUPPORTED",
+            message="この記憶ソースはまだ同期に対応していません。",
+            status_code=400,
+        )
+    settings = {item.source: item for item in memory_source_service.list_settings(session)}
+    setting = settings[source]
+    if not setting.connected or not setting.enabled:
+        raise EnishiError(
+            code="MEMORY_SOURCE_NOT_CONNECTED",
+            message="先にフォルダを指定して記憶ソースを有効にしてください。",
+            status_code=400,
+        )
+    return MemorySourceSyncRead.model_validate(
+        external_memory_service.sync_markdown_folder(
+            session, user_id=body.user_id, source=source, raw_path=setting.scope
+        )
+    )
 
 
 @v1_router.post("/memories", response_model=MemoryRead, status_code=201)
@@ -299,7 +381,11 @@ def list_audit_events(
 
 
 @v1_router.post("/approvals/{approval_id}/approve", response_model=ApprovalRead)
-def approve_approval(approval_id: str, session: Session = Depends(get_session)) -> ApprovalRead:
+def approve_approval(
+    approval_id: str,
+    body: ApprovalResolutionRequest | None = None,
+    session: Session = Depends(get_session),
+) -> ApprovalRead:
     pending = session.get(Approval, approval_id)
     if (
         pending is not None
@@ -307,7 +393,10 @@ def approve_approval(approval_id: str, session: Session = Depends(get_session)) 
         and pending.payload.get("remote")
     ):
         approval = remote_negotiation.resolve_remote_approval(
-            session, approval_id, ApprovalStatus.APPROVED.value
+            session,
+            approval_id,
+            ApprovalStatus.APPROVED.value,
+            body.selected_slot if body else None,
         )
         try:
             remote_negotiation.flush_outbox(session, get_relay_client())
@@ -720,6 +809,14 @@ def agent_identity(
     )
 
 
+@v1_router.get("/agent/card", response_model=IdentityCardRead)
+def get_my_identity_card(
+    user_id: str,
+    session: Session = Depends(get_session),
+) -> IdentityCardRead:
+    return IdentityCardRead.model_validate(identity_card_service.create_card(session, user_id))
+
+
 @v1_router.get("/peers", response_model=list[PeerRead])
 def list_peers(session: Session = Depends(get_session)) -> list[PeerRead]:
     return [PeerRead.model_validate(p) for p in peer_service.list_peers(session)]
@@ -734,6 +831,18 @@ def register_peer(body: PeerCreate, session: Session = Depends(get_session)) -> 
         display_name=body.display_name,
         public_key=body.public_key,
         aliases=body.aliases,
+        capabilities=body.capabilities,
+    )
+    return PeerRead.model_validate(peer)
+
+
+@v1_router.post("/peers/from-card", response_model=PeerRead, status_code=201)
+def register_peer_from_card(
+    body: IdentityCardAdd,
+    session: Session = Depends(get_session),
+) -> PeerRead:
+    peer = identity_card_service.register_from_card(
+        session, body.card.model_dump(exclude_unset=True)
     )
     return PeerRead.model_validate(peer)
 

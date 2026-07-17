@@ -1,7 +1,9 @@
 from pathlib import Path
 
+from enishi_core.models import CloneContextPackage
 from enishi_core.providers.claude_code import build_task_command as build_claude_command
 from enishi_core.providers.codex import build_task_command as build_codex_command
+from enishi_core.providers.context_file import materialize_context
 from fastapi.testclient import TestClient
 
 
@@ -43,3 +45,27 @@ def test_claude_command_contains_prompt_flag() -> None:
     assert "-p" in command
     assert "--add-dir" in command
     assert str(project_root) in command
+
+
+def test_context_file_is_materialized_with_private_permissions_and_removed(tmp_path: Path) -> None:
+    package = CloneContextPackage(
+        id="ctx1",
+        clone_id="clone1",
+        clone_version=1,
+        task_goal="test",
+        relevant_preferences={},
+        relevant_skills={},
+        relevant_project_context={},
+        relevant_decisions=[],
+        coding_rules=[],
+        prohibited_actions=["secret files"],
+        approval_requirements=[],
+        file_references=[],
+        estimated_tokens=10,
+        content_hash="hash",
+    )
+    with materialize_context(package, tmp_path) as path:
+        assert path.exists()
+        assert path.stat().st_mode & 0o777 == 0o600
+        assert "secret files" in path.read_text(encoding="utf-8")
+    assert not path.exists()

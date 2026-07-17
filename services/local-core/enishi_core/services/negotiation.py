@@ -24,12 +24,14 @@ from enishi_core.models import (
     NegotiationSession,
     NegotiationStatus,
     TokenMetric,
+    User,
 )
 from enishi_core.models.base import utc_now
 from enishi_core.services import approvals as approval_service
 from enishi_core.services.audit import log_event
 from enishi_core.services.memories import exportable_memories
 from enishi_core.services.policies import delegation_enabled
+from enishi_core.services.public_reasons import to_public_reason
 from enishi_core.services.scheduling import (
     Slot,
     candidate_slots,
@@ -185,13 +187,29 @@ def run_negotiation(
     initiator = _require_active_clone(session_db, initiator_user_id)
     responder = _require_active_clone(session_db, responder_user_id)
 
-    initiator_busy = collect_busy(exportable_memories(session_db, initiator_user_id))
-    responder_busy = collect_busy(exportable_memories(session_db, responder_user_id))
+    initiator_user = session_db.get(User, initiator_user_id)
+    responder_user = session_db.get(User, responder_user_id)
+    initiator_timezone = initiator_user.timezone if initiator_user else "UTC"
+    responder_timezone = responder_user.timezone if responder_user else "UTC"
+    initiator_busy = collect_busy(
+        exportable_memories(session_db, initiator_user_id), initiator_timezone
+    )
+    responder_busy = collect_busy(
+        exportable_memories(session_db, responder_user_id), responder_timezone
+    )
     initiator_candidates = candidate_slots(
-        date_range, preferred_time_ranges, duration_minutes, initiator_busy
+        date_range,
+        preferred_time_ranges,
+        duration_minutes,
+        initiator_busy,
+        initiator_timezone,
     )
     responder_candidates = candidate_slots(
-        date_range, preferred_time_ranges, duration_minutes, responder_busy
+        date_range,
+        preferred_time_ranges,
+        duration_minutes,
+        responder_busy,
+        responder_timezone,
     )
 
     negotiation = NegotiationSession(
@@ -238,6 +256,7 @@ def run_negotiation(
             "duration_minutes": duration_minutes,
             "date_range": date_range,
             "preferred_time_ranges": preferred_time_ranges,
+            "timezone": initiator_timezone,
         },
     )
 
@@ -273,7 +292,11 @@ def run_negotiation(
         counter_offer = candidates_by_clone[receiver.id][:_OFFER_SIZE]
         offers.append(counter_offer)
         add_message(
-            receiver, sender, MessageType.COUNTER, delta={"candidate_slots": counter_offer}
+            receiver,
+            sender,
+            MessageType.COUNTER,
+            payload={"public_reason": "no_common_slot"},
+            delta={"candidate_slots": counter_offer},
         )
         current_offer = counter_offer
         sender, receiver = receiver, sender
@@ -477,7 +500,11 @@ def run_task_request_negotiation(
             receiver_agent_id=initiator.id,
             message_type=MessageType.COUNTER.value,
             intent=INTENT_TASK_REQUEST,
-            payload={},
+            payload={
+                "public_reason": to_public_reason(
+                    ["task_request_policy_threshold_exceeded"]
+                )
+            },
             delta={"proposed_task": counter},
         )
         session_db.add(message)
@@ -593,6 +620,7 @@ def on_approval_resolved(session_db: Session, approval: Approval) -> None:
         else MessageType.REJECT.value
     )
     delta: dict[str, Any]
+    message_payload: dict[str, Any] = {}
     if approval.status == ApprovalStatus.APPROVED.value:
         accepted = dict(approval.payload.get("payload", {}))
         delta = {"accepted_task": accepted, "approval_id": approval.id}
@@ -606,6 +634,11 @@ def on_approval_resolved(session_db: Session, approval: Approval) -> None:
             else "APPROVAL_REJECTED"
         )
         delta = {"code": code, "approval_id": approval.id}
+        message_payload = {
+            "public_reason": to_public_reason(
+                ["approval_expired" if code == "APPROVAL_EXPIRED" else "human_rejected"]
+            )
+        }
         negotiation.status = NegotiationStatus.FAILED.value
         negotiation.result = {"code": code, "approval_id": approval.id}
 
@@ -617,7 +650,7 @@ def on_approval_resolved(session_db: Session, approval: Approval) -> None:
             receiver_agent_id=negotiation.initiator_clone_id,
             message_type=message_type,
             intent=negotiation.intent,
-            payload={},
+            payload=message_payload,
             delta=delta,
             requires_human_approval=True,
         )
