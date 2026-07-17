@@ -29,7 +29,7 @@ def test_update_user_profile(client: TestClient, auth_headers: dict[str, str]) -
     updated = client.put(
         f"/v1/users/{created['id']}",
         json={
-            "display_name": "中村雅志",
+            "display_name": "中村奨志",
             "nickname": "まさし",
             "timezone": "Asia/Tokyo",
             "language": "ja",
@@ -39,7 +39,7 @@ def test_update_user_profile(client: TestClient, auth_headers: dict[str, str]) -
 
     assert updated.status_code == 200
     body = updated.json()
-    assert body["display_name"] == "中村雅志"
+    assert body["display_name"] == "中村奨志"
     assert body["nickname"] == "まさし"
 
 

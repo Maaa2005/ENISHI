@@ -148,7 +148,7 @@ def main() -> None:
     user_a_node = Node("User A", 8871, "demo-token-a")
     user_b_node = Node("User B", 8872, "demo-token-b")
 
-    user_a = create_user(user_a_node, "中村 雅志")
+    user_a = create_user(user_a_node, "中村 奨志")
     user_b = create_user(user_b_node, "佐藤先生")
     identity_a = user_a_node.request(f"/v1/agent/identity?user_id={user_a['id']}")
     identity_b = user_b_node.request(f"/v1/agent/identity?user_id={user_b['id']}")

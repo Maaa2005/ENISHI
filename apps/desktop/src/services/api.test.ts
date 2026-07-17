@@ -119,7 +119,7 @@ describe("ApiClient", () => {
     const client = new ApiClient(connection, fetchFn);
 
     await client.updateUser("u1", {
-      display_name: "中村雅志",
+      display_name: "中村奨志",
       nickname: "まさし",
       timezone: "Asia/Tokyo",
       language: "ja",
@@ -129,7 +129,7 @@ describe("ApiClient", () => {
     expect(url).toBe("http://127.0.0.1:12345/v1/users/u1");
     expect(init.method).toBe("PUT");
     expect(JSON.parse(init.body as string)).toEqual({
-      display_name: "中村雅志",
+      display_name: "中村奨志",
       nickname: "まさし",
       timezone: "Asia/Tokyo",
       language: "ja",
