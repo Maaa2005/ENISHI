@@ -75,14 +75,19 @@ function MetricsPanel({ metrics }: { metrics: NegotiationMetrics }) {
   return <section className="negotiation-metrics"><span>交渉効率</span><strong>{metrics.reduction_rate === null ? "—" : `${metrics.reduction_rate.toFixed(0)}%`}</strong><small>通常のメール調整より少ないトークン</small></section>;
 }
 
-export function NegotiationsPage({ client, onOpenApprovals }: { client: ApiClient | null; onOpenApprovals: () => void }) {
+export function NegotiationsPage({ client, focusedSessionId, onOpenApprovals }: { client: ApiClient | null; focusedSessionId?: string | null; onOpenApprovals: () => void }) {
   const { sessions, selectedSessionId, messages, metrics, decision, loading, error, loadSessions, select } = useNegotiationStore();
   const clones = useAppStore((state) => state.clones);
-  const ownAgentIds = new Set(clones.map((clone) => clone.id));
+  const agentIdentity = useAppStore((state) => state.agentIdentity);
+  const ownAgentIds = new Set([
+    ...clones.map((clone) => clone.id),
+    ...(agentIdentity ? [agentIdentity.personal_agent_id, agentIdentity.node_id] : []),
+  ]);
   const selected = sessions.find((session) => session.id === selectedSessionId) ?? null;
   const waitingCount = sessions.filter((session) => session.pending_approval_id).length;
 
   useEffect(() => { if (client) void loadSessions(client); }, [client, loadSessions]);
+  useEffect(() => { if (client && focusedSessionId && sessions.some((item) => item.id === focusedSessionId)) void select(client, focusedSessionId); }, [client, focusedSessionId, sessions, select]);
   useEffect(() => { if (client && sessions.length > 0 && !selectedSessionId) { const priority = sessions.find((item) => item.pending_approval_id) ?? sessions[0]; void select(client, priority.id); } }, [client, sessions, selectedSessionId, select]);
 
   return (

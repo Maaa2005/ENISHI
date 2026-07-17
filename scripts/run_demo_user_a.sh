@@ -5,7 +5,15 @@ set -eu
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR/services/local-core"
 
-DATA_DIR="$ROOT_DIR/.tmp/demo-user-a"
+DEMO_ROOT="${ENISHI_DEMO_ROOT:-$ROOT_DIR/.tmp/demo-current}"
+PYTHON="${ENISHI_PYTHON:-$ROOT_DIR/.venv/bin/python}"
+if [ ! -x "$PYTHON" ]; then
+  echo "Demo Python not found: $PYTHON" >&2
+  echo "Run 'uv sync --all-packages' in $ROOT_DIR first." >&2
+  exit 1
+fi
+
+DATA_DIR="$DEMO_ROOT/user-a"
 mkdir -p "$DATA_DIR/cache" "$DATA_DIR/logs"
 
 export ENISHI_DATA_DIR="$DATA_DIR"
@@ -18,4 +26,4 @@ PORT="${ENISHI_LOCAL_PORT:-8871}"
 
 echo "ENISHI Demo User A: http://127.0.0.1:${PORT} (token: ${ENISHI_LOCAL_TOKEN})"
 echo "data: ${DATA_DIR}"
-exec uv run uvicorn enishi_core.main:app --host 127.0.0.1 --port "$PORT"
+exec "$PYTHON" -m uvicorn enishi_core.main:app --host 127.0.0.1 --port "$PORT" --log-level warning

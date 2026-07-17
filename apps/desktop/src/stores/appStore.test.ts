@@ -47,6 +47,7 @@ describe("appStore", () => {
       agreements: [],
       metrics: null,
       users: [],
+      agentIdentity: null,
       relayStatus: null,
     });
   });
@@ -63,12 +64,22 @@ describe("appStore", () => {
 
   it("ユーザーが存在すればクローンを取得する", async () => {
     const clones = [{ id: "c1", name: "中村のクローン", status: "review_required" }];
+    const agentIdentity = {
+      personal_agent_id: "pa_1",
+      user_id: "u1",
+      active_clone_id: "c1",
+      node_id: "agt_1",
+      public_key: "public-key",
+      fingerprint: "aa:bb",
+    };
     const client = makeClient({
       listUsers: vi.fn().mockResolvedValue([{ id: "u1" }]),
       listClones: vi.fn().mockResolvedValue(clones),
+      getAgentIdentity: vi.fn().mockResolvedValue(agentIdentity),
     });
     await useAppStore.getState().refresh(client);
     expect(useAppStore.getState().clones).toEqual(clones);
+    expect(useAppStore.getState().agentIdentity).toEqual(agentIdentity);
   });
 
   it("接続失敗時はerrorを設定する", async () => {

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { EnishiApiError, type ApiClient } from "../services/api";
 import type {
+  AgentIdentityRead,
   AgreementRead,
   ApprovalRead,
   CloneRead,
@@ -25,6 +26,7 @@ export interface AppState {
   agreements: AgreementRead[];
   metrics: MetricsSummary | null;
   users: UserRead[];
+  agentIdentity: AgentIdentityRead | null;
   relayStatus: RelayStatusRead | null;
   requesting: boolean;
   requestError: string | null;
@@ -45,6 +47,7 @@ export const useAppStore = create<AppState>((set) => ({
   agreements: [],
   metrics: null,
   users: [],
+  agentIdentity: null,
   relayStatus: null,
   requesting: false,
   requestError: null,
@@ -88,6 +91,7 @@ export const useAppStore = create<AppState>((set) => ({
       const environment = await client.getEnvironment();
       const users = await client.listUsers();
       const clones = users.length > 0 ? await client.listClones(users[0].id) : [];
+      const agentIdentity = users.length > 0 ? await client.getAgentIdentity(users[0].id) : null;
       const [peers, negotiations, approvals, agreements, metrics, relayStatus] = await Promise.all([
         client.listPeers(),
         client.listNegotiations(),
@@ -100,6 +104,7 @@ export const useAppStore = create<AppState>((set) => ({
         health,
         environment,
         users,
+        agentIdentity,
         clones,
         peers,
         negotiations,

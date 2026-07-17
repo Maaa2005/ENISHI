@@ -53,6 +53,7 @@ export function App() {
   const refresh = useAppStore((state) => state.refresh);
   const [client, setClient] = useState<ApiClient | null>(null);
   const [tab, setTab] = useState<Tab>("home");
+  const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,9 +96,9 @@ export function App() {
         <AgentSetupPage client={client} onOpenPeers={() => setTab("peers")} />
       )}
       {tab === "peers" && <PeersPage client={client} />}
-      {tab === "negotiations" && <NegotiationsPage client={client} onOpenApprovals={() => setTab("approvals")} />}
+      {tab === "negotiations" && <NegotiationsPage client={client} focusedSessionId={focusedSessionId} onOpenApprovals={() => setTab("approvals")} />}
       {tab === "agreements" && <AgreementsPage client={client} />}
-      {tab === "approvals" && <ApprovalsPage client={client} />}
+      {tab === "approvals" && <ApprovalsPage client={client} onOpenNegotiation={(sessionId) => { setFocusedSessionId(sessionId); setTab("negotiations"); }} onOpenAgreements={() => setTab("agreements")} />}
       {tab === "memories" && <PlaceholderPage title="記憶" />}
       {tab === "metrics" && <MetricsPage client={client} />}
       {tab === "clones" && <PlaceholderPage title="クローン" />}

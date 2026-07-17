@@ -1,6 +1,35 @@
 # ENISHI two-node + relay demo
 
-## Start
+## Presentation demo (recommended)
+
+Start a fresh two-person demo, seed the users/agents/peer trust automatically,
+create a negotiation that is waiting for the presenter's approval, and launch
+the browser UI:
+
+```bash
+./scripts/run_demo_presentation.sh
+```
+
+Open `http://127.0.0.1:5173`. The generated data is isolated in a new
+`.tmp/enishi-demo.*` directory on every run, so an earlier rehearsal cannot
+pollute the presentation. Press Ctrl-C in the terminal to stop the UI, both
+Local Cores, and the Relay.
+
+The prepared story is:
+
+1. Sato's agent asks Nakamura's agent for a 30-minute ENISHI progress meeting.
+2. The agents compare availability without sending either raw calendar.
+3. Nakamura's relationship policy stops the agent before it commits.
+4. Approve it in **Approvals**. The UI updates the pending badge immediately
+   and presents **View negotiation log** / **View agreement** as the next step.
+5. Show the signed exchange in **Negotiations**, then the human-readable
+   confirmed time and AUN Protocol record in **Agreements**.
+
+The first run requires the repository dependencies to be installed. After that,
+the presentation launcher uses the repository virtual environment directly and
+does not ask `uv` to rebuild the project over the network.
+
+## Manual developer demo
 
 Run three processes in three terminals:
 
@@ -22,7 +51,7 @@ Or start them all at once:
 | User A | `http://127.0.0.1:8871` | `demo-token-a` | `.tmp/demo-user-a` |
 | User B | `http://127.0.0.1:8872` | `demo-token-b` | `.tmp/demo-user-b` |
 
-Each Local Core uses its own SQLite database, key, and data directory. The relay reads the real agent IDs from the keys in `.tmp/demo-user-a` and `.tmp/demo-user-b` and sets `RELAY_NODE_TOKENS` automatically.
+Each Local Core uses its own SQLite database, key, and data directory. The relay reads the real agent IDs from the current demo data directory and sets `RELAY_NODE_TOKENS` automatically.
 
 ## Pairing
 
@@ -72,7 +101,7 @@ Point the desktop app at User A:
 
 ```bash
 cd apps/desktop
-ENISHI_LOCAL_PORT=8871 ENISHI_LOCAL_TOKEN=demo-token-a npm run dev
+VITE_CORE_PORT=8871 VITE_CORE_TOKEN=demo-token-a npm run dev
 ```
 
 Walkthrough:

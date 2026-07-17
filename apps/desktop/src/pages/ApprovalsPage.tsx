@@ -1,19 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ApiClient } from "../services/api";
+import { useAppStore } from "../stores/appStore";
 import type { ApprovalRead } from "../types";
-
-const sectionStyle: React.CSSProperties = {
-  border: "1px solid #ddd",
-  borderRadius: 8,
-  padding: "1rem",
-};
-
-function statusColor(status: string): string {
-  if (status === "pending") return "#8a5a00";
-  if (status === "approved") return "#1f7a1f";
-  if (status === "rejected" || status === "expired") return "#b3261e";
-  return "#555";
-}
 
 const reasonLabels: Record<string, string> = {
   schedule_negotiation_not_delegated: "日程交渉を代理AIへ委任していません",
@@ -25,6 +13,25 @@ const reasonLabels: Record<string, string> = {
   common_slot_within_delegation: "委任範囲内で共通候補が見つかりました",
 };
 
+function formatDateTime(value: string | undefined): string {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("ja-JP", {
+    month: "long",
+    day: "numeric",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function statusLabel(status: string): string {
+  if (status === "pending") return "判断待ち";
+  if (status === "approved") return "承認済み";
+  if (status === "rejected") return "拒否済み";
+  if (status === "expired") return "期限切れ";
+  return status;
+}
+
 function NegotiationDecisionDetails({ approval }: { approval: ApprovalRead }) {
   const reasons = Array.isArray(approval.payload.reason_codes)
     ? approval.payload.reason_codes.filter((value): value is string => typeof value === "string")
@@ -34,18 +41,33 @@ function NegotiationDecisionDetails({ approval }: { approval: ApprovalRead }) {
     : null;
   const slot = approval.payload.selected_slot as { start?: string; end?: string } | undefined;
   return (
-    <dl className="decision-facts">
-      <div><dt>提案された判断</dt><dd>この日程候補を承認する</dd></div>
-      <div><dt>候補日時</dt><dd>{slot?.start ?? "—"} 〜 {slot?.end ?? "—"}</dd></div>
+    <dl className="approval-facts">
+      <div><dt>提案された日時</dt><dd>{formatDateTime(slot?.start)}〜{slot?.end ? new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit" }).format(new Date(slot.end)) : "—"}</dd></div>
       <div><dt>代理AIの確信度</dt><dd>{confidence === null ? "—" : `${confidence}%`}</dd></div>
-      <div><dt>本人確認が必要な理由</dt><dd>{reasons.map((reason) => reasonLabels[reason] ?? reason).join("、") || "—"}</dd></div>
+      <div><dt>本人確認の理由</dt><dd>{reasons.map((reason) => reasonLabels[reason] ?? reason).join("、") || "—"}</dd></div>
+      <div><dt>承認の有効期限</dt><dd>{formatDateTime(approval.expires_at)}</dd></div>
     </dl>
   );
 }
 
-export function ApprovalsPage({ client }: { client: ApiClient | null }) {
+interface ApprovalsPageProps {
+  client: ApiClient | null;
+  onOpenNegotiation: (sessionId: string) => void;
+  onOpenAgreements: () => void;
+}
+
+export function ApprovalsPage({ client, onOpenNegotiation, onOpenAgreements }: ApprovalsPageProps) {
+  const refreshApp = useAppStore((state) => state.refresh);
   const [approvals, setApprovals] = useState<ApprovalRead[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [resolved, setResolved] = useState<{ sessionId: string; action: "approve" | "reject" } | null>(null);
+
+  const ordered = useMemo(
+    () => [...approvals].sort((a, b) => Number(b.status === "pending") - Number(a.status === "pending")),
+    [approvals],
+  );
+  const pendingCount = approvals.filter((approval) => approval.status === "pending").length;
 
   const load = async () => {
     if (!client) return;
@@ -57,42 +79,58 @@ export function ApprovalsPage({ client }: { client: ApiClient | null }) {
     }
   };
 
-  useEffect(() => {
-    void load();
-  }, [client]);
+  useEffect(() => { void load(); }, [client]);
 
   const resolve = async (approval: ApprovalRead, action: "approve" | "reject") => {
     if (!client) return;
-    if (action === "approve") await client.approveApproval(approval.id);
-    else await client.rejectApproval(approval.id);
-    await load();
+    setProcessingId(approval.id);
+    setError(null);
+    try {
+      if (action === "approve") await client.approveApproval(approval.id);
+      else await client.rejectApproval(approval.id);
+      await Promise.all([load(), refreshApp(client)]);
+      const sessionId = typeof approval.payload.session_id === "string" ? approval.payload.session_id : "";
+      setResolved({ sessionId, action });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setProcessingId(null);
+    }
   };
 
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem", maxWidth: 960 }}>
-      <h1>承認</h1>
-      {error && <p style={{ color: "#c0392b" }}>{error}</p>}
-      {approvals.length === 0 && <p>承認待ちはありません</p>}
-      <div style={{ display: "grid", gap: "1rem" }}>
-        {approvals.map((approval) => (
-          <section key={approval.id} style={sectionStyle}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem" }}>
-              <div>
-                <h3 style={{ margin: 0 }}>{approval.action_type}</h3>
-                <p style={{ margin: "0.25rem 0" }}>{approval.description}</p>
-                <p style={{ margin: 0, color: "#555" }}>
-                  level {approval.level} / expires_at {approval.expires_at}
-                </p>
-              </div>
-              <strong style={{ color: statusColor(approval.status) }}>{approval.status}</strong>
+    <main className="page approvals-page">
+      <header className="page-header">
+        <div><p className="eyebrow">HUMAN CONTROL</p><h1>承認</h1><p className="subtitle">代理AIがあなたを拘束する前に、重要な判断だけを確認します。</p></div>
+        <div className={`decision-count ${pendingCount ? "active" : ""}`}><strong>{pendingCount}</strong><span>判断待ち</span></div>
+      </header>
+
+      {error && <p role="alert" className="alert error">Local Coreから承認情報を取得できません: {error}</p>}
+      {resolved && (
+        <section className={`resolution-banner ${resolved.action === "approve" ? "success" : "rejected"}`}>
+          <div><span className="resolution-icon">{resolved.action === "approve" ? "✓" : "×"}</span><div><strong>{resolved.action === "approve" ? "承認しました。AI同士の合意が成立しました" : "拒否しました。相手の代理AIへ結果を返しました"}</strong><p>{resolved.action === "approve" ? "交渉ログと保存された合意を続けて確認できます。" : "交渉ログで拒否結果を確認できます。"}</p></div></div>
+          <div className="resolution-actions">
+            {resolved.sessionId && <button onClick={() => onOpenNegotiation(resolved.sessionId)}>交渉ログを見る</button>}
+            {resolved.action === "approve" && <button className="primary-button" onClick={onOpenAgreements}>成立した合意を見る</button>}
+          </div>
+        </section>
+      )}
+
+      {!error && ordered.length === 0 && <section className="empty-state"><div className="empty-icon">✓</div><h2>判断待ちはありません</h2><p>代理AIは委任範囲内で動作しています。</p></section>}
+      <div className="approval-list">
+        {ordered.map((approval) => (
+          <section key={approval.id} className={`approval-card ${approval.status}`}>
+            <div className="approval-card-header">
+              <div><p className="eyebrow">NEGOTIATION DECISION</p><h2>{approval.status === "pending" ? "この日程候補を承認しますか？" : "日程候補の判断"}</h2><p>{approval.description}</p></div>
+              <span className={`approval-status ${approval.status}`}>{statusLabel(approval.status)}</span>
             </div>
             {approval.action_type === "negotiation_decision"
               ? <NegotiationDecisionDetails approval={approval} />
-              : <pre style={{ background: "#f6f6f6", padding: "0.75rem", overflowX: "auto" }}>{JSON.stringify(approval.payload, null, 2)}</pre>}
+              : <pre>{JSON.stringify(approval.payload, null, 2)}</pre>}
             {approval.status === "pending" && (
-              <div style={{ display: "flex", gap: "0.5rem" }}>
-                <button onClick={() => resolve(approval, "approve")}>承認</button>
-                <button onClick={() => resolve(approval, "reject")}>拒否</button>
+              <div className="approval-actions">
+                <button onClick={() => void resolve(approval, "reject")} disabled={processingId === approval.id}>拒否する</button>
+                <button className="primary-button" onClick={() => void resolve(approval, "approve")} disabled={processingId === approval.id}>{processingId === approval.id ? "処理中…" : "この候補を承認"}</button>
               </div>
             )}
           </section>

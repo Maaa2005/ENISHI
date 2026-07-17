@@ -3,17 +3,26 @@
 set -eu
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-mkdir -p "$ROOT_DIR/.tmp/demo-relay"
-mkdir -p "$ROOT_DIR/.tmp/demo-user-a" "$ROOT_DIR/.tmp/demo-user-b"
+DEMO_ROOT="${ENISHI_DEMO_ROOT:-$ROOT_DIR/.tmp/demo-current}"
+PYTHON="${ENISHI_PYTHON:-$ROOT_DIR/.venv/bin/python}"
+
+if [ ! -x "$PYTHON" ]; then
+  echo "Demo Python not found: $PYTHON" >&2
+  echo "Run 'uv sync --all-packages' in $ROOT_DIR first." >&2
+  exit 1
+fi
+
+mkdir -p "$DEMO_ROOT/relay"
+mkdir -p "$DEMO_ROOT/user-a" "$DEMO_ROOT/user-b"
 
 agent_id_for() {
   local data_dir="$1"
   cd "$ROOT_DIR/services/local-core"
-  ENISHI_DATA_DIR="$data_dir" uv run python -c 'from pathlib import Path; from enishi_core.security.keys import ensure_node_keypair; import os; print(ensure_node_keypair(Path(os.environ["ENISHI_DATA_DIR"]))[0].agent_id)'
+  ENISHI_DATA_DIR="$data_dir" "$PYTHON" -c 'from pathlib import Path; from enishi_core.security.keys import ensure_node_keypair; import os; print(ensure_node_keypair(Path(os.environ["ENISHI_DATA_DIR"]))[0].agent_id)'
 }
 
-AGENT_A="$(agent_id_for "$ROOT_DIR/.tmp/demo-user-a")"
-AGENT_B="$(agent_id_for "$ROOT_DIR/.tmp/demo-user-b")"
+AGENT_A="$(agent_id_for "$DEMO_ROOT/user-a")"
+AGENT_B="$(agent_id_for "$DEMO_ROOT/user-b")"
 
 cd "$ROOT_DIR/services/relay"
 
@@ -24,4 +33,4 @@ PORT="${RELAY_PORT:-8870}"
 
 echo "ENISHI Relay demo: http://127.0.0.1:${PORT}"
 echo "agents: ${RELAY_NODE_TOKENS}"
-exec uv run uvicorn relay.main:app --host 127.0.0.1 --port "$PORT"
+exec "$PYTHON" -m uvicorn relay.main:app --host 127.0.0.1 --port "$PORT" --log-level warning
