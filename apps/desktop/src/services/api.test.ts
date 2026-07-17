@@ -43,6 +43,17 @@ describe("ApiClient", () => {
     });
   });
 
+  it("listMemoriesは対象ユーザーをqueryへ含める", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse([]));
+    const client = new ApiClient(connection, fetchFn);
+
+    await client.listMemories("user 1");
+
+    expect(fetchFn.mock.calls[0][0]).toBe(
+      "http://127.0.0.1:12345/v1/memories?user_id=user+1",
+    );
+  });
+
   it("createNegotiationは/v1/negotiationsへ構造化リクエストをPOSTする", async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ id: "n1", status: "agreed" }));
     const client = new ApiClient(connection, fetchFn);

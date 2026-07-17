@@ -24,6 +24,9 @@ The prepared story is:
    and presents **View negotiation log** / **View agreement** as the next step.
 5. Show the signed exchange in **Negotiations**, then the human-readable
    confirmed time and AUN Protocol record in **Agreements**.
+6. Open **Memories** to explain that preferences, relationship rules, and
+   privacy policy stay local. Open **Clones** to show the active personal
+   agent's confidence, memory basis, delegation boundary, and approval gate.
 
 The first run requires the repository dependencies to be installed. After that,
 the presentation launcher uses the repository virtual environment directly and

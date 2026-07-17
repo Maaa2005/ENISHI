@@ -9,6 +9,7 @@ import type {
   DefaultDisclosurePolicyRead,
   EnvironmentInfo,
   HealthResponse,
+  MemoryRead,
   MemorySourceSettingPatch,
   MemorySourceSettingRead,
   MetricsSummary,
@@ -102,6 +103,11 @@ export class ApiClient {
 
   listMemorySources(): Promise<MemorySourceSettingRead[]> {
     return this.request<MemorySourceSettingRead[]>("/v1/memory-sources");
+  }
+
+  listMemories(userId: string): Promise<MemoryRead[]> {
+    const query = new URLSearchParams({ user_id: userId }).toString();
+    return this.request<MemoryRead[]>(`/v1/memories?${query}`);
   }
 
   putMemorySources(sources: MemorySourceSettingPatch[]): Promise<MemorySourceSettingRead[]> {

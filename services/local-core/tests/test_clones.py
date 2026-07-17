@@ -22,6 +22,9 @@ def test_ensure_creates_review_required_clone(
     assert clone["user_id"] == user_id
     assert clone["activated_at"] is None
     assert clone["coding_profile"]["approval_rules"]["git_push"] is False
+    assert clone["identity_profile"]["display_name"] == "中村"
+    assert clone["policy_profile"]["purpose"] == "コーディング支援"
+    assert clone["memory_snapshot_id"] is not None
 
 
 def test_ensure_reuses_existing_clone(

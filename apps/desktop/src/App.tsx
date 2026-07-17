@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { AgreementsPage } from "./pages/AgreementsPage";
 import { AgentSetupPage } from "./pages/AgentSetupPage";
 import { ApprovalsPage } from "./pages/ApprovalsPage";
+import { ClonesPage } from "./pages/ClonesPage";
 import { HomePage } from "./pages/HomePage";
+import { MemoriesPage } from "./pages/MemoriesPage";
 import { MetricsPage } from "./pages/MetricsPage";
 import { NegotiationsPage } from "./pages/NegotiationsPage";
 import { PeersPage } from "./pages/PeersPage";
@@ -99,9 +101,9 @@ export function App() {
       {tab === "negotiations" && <NegotiationsPage client={client} focusedSessionId={focusedSessionId} onOpenApprovals={() => setTab("approvals")} />}
       {tab === "agreements" && <AgreementsPage client={client} />}
       {tab === "approvals" && <ApprovalsPage client={client} onOpenNegotiation={(sessionId) => { setFocusedSessionId(sessionId); setTab("negotiations"); }} onOpenAgreements={() => setTab("agreements")} />}
-      {tab === "memories" && <PlaceholderPage title="記憶" />}
+      {tab === "memories" && <MemoriesPage client={client} />}
       {tab === "metrics" && <MetricsPage client={client} />}
-      {tab === "clones" && <PlaceholderPage title="クローン" />}
+      {tab === "clones" && <ClonesPage client={client} />}
       {tab === "projects" && <PlaceholderPage title="プロジェクト" />}
       {tab === "agents" && <PlaceholderPage title="外部エージェント" />}
       {tab === "tasks" && <PlaceholderPage title="新規タスク" />}

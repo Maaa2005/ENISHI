@@ -67,7 +67,14 @@ class CloneRead(BaseModel):
     name: str
     version: int
     status: str
+    identity_profile: dict[str, Any]
+    preference_profile: dict[str, Any]
+    skill_profile: dict[str, Any]
     coding_profile: dict[str, Any]
+    project_profile: dict[str, Any]
+    policy_profile: dict[str, Any]
+    communication_profile: dict[str, Any]
+    memory_snapshot_id: str | None
     confidence_score: float
     created_at: datetime
     activated_at: datetime | None

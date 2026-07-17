@@ -53,10 +53,36 @@ export interface CloneRead {
   name: string;
   version: number;
   status: string;
+  identity_profile: Record<string, unknown>;
+  preference_profile: Record<string, unknown>;
+  skill_profile: Record<string, unknown>;
   coding_profile: Record<string, unknown>;
+  project_profile: Record<string, unknown>;
+  policy_profile: Record<string, unknown>;
+  communication_profile: Record<string, unknown>;
+  memory_snapshot_id: string | null;
   confidence_score: number;
   created_at: string;
   activated_at: string | null;
+}
+
+export interface MemoryRead {
+  id: string;
+  user_id: string;
+  source_type: string;
+  source_reference: string | null;
+  memory_type: string;
+  title: string;
+  content: Record<string, unknown>;
+  searchable_text: string | null;
+  confidence: number;
+  sensitivity: "public" | "internal" | "private" | "restricted" | "secret" | string;
+  relevance_tags: string[];
+  effective_from: string | null;
+  effective_until: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface NegotiationRead {
