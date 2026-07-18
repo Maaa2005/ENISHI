@@ -10,6 +10,7 @@ import type {
   DefaultDisclosurePolicyRead,
   EnvironmentInfo,
   HealthResponse,
+  IdentityCardRead,
   MemoryRead,
   MemorySourceSettingPatch,
   MemorySourceSettingRead,
@@ -210,6 +211,12 @@ export class ApiClient {
     );
   }
 
+  getIdentityCard(userId: string): Promise<IdentityCardRead> {
+    return this.request<IdentityCardRead>(
+      `/v1/agent/card?user_id=${encodeURIComponent(userId)}`,
+    );
+  }
+
   getRelayStatus(): Promise<RelayStatusRead> {
     return this.request<RelayStatusRead>("/v1/relay/status");
   }
@@ -222,6 +229,13 @@ export class ApiClient {
     return this.request<PeerRead>("/v1/peers", {
       method: "POST",
       body: JSON.stringify(params),
+    });
+  }
+
+  createPeerFromCard(card: IdentityCardRead): Promise<PeerRead> {
+    return this.request<PeerRead>("/v1/peers/from-card", {
+      method: "POST",
+      body: JSON.stringify({ card }),
     });
   }
 

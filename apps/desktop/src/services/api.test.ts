@@ -166,6 +166,34 @@ describe("ApiClient", () => {
     });
   });
 
+  it("Agent Cardの取得とpendingピア登録を既定パスへ送る", async () => {
+    const card = {
+      version: "enishi-card/2" as const,
+      agent_id: "node_1",
+      personal_agent_id: "agent_1",
+      public_key: "key",
+      fingerprint: "aa:bb",
+      profile: {},
+      capabilities: {},
+      relay_endpoint: "",
+      issued_at: "2026-07-19T00:00:00Z",
+      signature: "sig",
+    };
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(card))
+      .mockResolvedValueOnce(jsonResponse({ agent_id: "node_1", status: "pending" }, 201));
+    const client = new ApiClient(connection, fetchFn);
+
+    await client.getIdentityCard("user 1");
+    await client.createPeerFromCard(card);
+
+    expect(fetchFn.mock.calls[0][0]).toBe(
+      "http://127.0.0.1:12345/v1/agent/card?user_id=user%201",
+    );
+    expect(fetchFn.mock.calls[1][0]).toBe("http://127.0.0.1:12345/v1/peers/from-card");
+    expect(JSON.parse(fetchFn.mock.calls[1][1].body as string)).toEqual({ card });
+  });
+
   it("updateUserはプロフィールをPUTする", async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ id: "u1" }));
     const client = new ApiClient(connection, fetchFn);

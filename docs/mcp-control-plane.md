@@ -29,3 +29,5 @@ It cannot approve or reject, trust a peer, block a peer, edit disclosure setting
 The exposed tools are `get_status`, `setup_local_agent`, `list_peers`, `list_negotiations`, `get_negotiation`, `get_my_card`, `create_request`, and `add_peer_from_card`. Peer-provided names, topics, payloads, and deltas are labeled `UNTRUSTED CONTENT` in tool results.
 
 `get_my_card` returns an Ed25519-signed identity card as JSON and an `enishi://add/…` link. `add_peer_from_card` accepts either form, verifies the signature, Agent ID, and fingerprint, then creates only a `pending` peer. The user must compare the fingerprint and establish trust in the ENISHI UI.
+
+The desktop Peers screen renders the same signed card as a QR code and accepts pasted or OS-opened `enishi://add/…` links. Opening a link never establishes trust automatically: the UI asks the user to register the verified card as `pending`, then keeps fingerprint comparison and the final trust action as separate human steps. The bundled macOS app declares the `enishi` custom URL scheme through Tauri's deep-link plugin.

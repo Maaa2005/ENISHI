@@ -220,6 +220,19 @@ export interface PeerCreateParams {
   capabilities?: Record<string, unknown>;
 }
 
+export interface IdentityCardRead {
+  version: "enishi-card/1" | "enishi-card/2";
+  agent_id: string;
+  personal_agent_id: string;
+  public_key: string;
+  fingerprint: string;
+  profile: Record<string, unknown>;
+  capabilities: Record<string, unknown>;
+  relay_endpoint: string;
+  issued_at: string;
+  signature: string;
+}
+
 export interface AgentIdentityRead {
   personal_agent_id: string;
   user_id: string;

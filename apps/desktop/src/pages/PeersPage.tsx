@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import QRCode from "qrcode";
 import type { ApiClient } from "../services/api";
 import type { PeerDisclosurePolicyRead, PeerRead } from "../types";
+import { decodeAgentInvite, encodeAgentInvite } from "../services/invite";
 import { useAppStore } from "../stores/appStore";
 
 const memoryTypes = [
@@ -104,11 +106,18 @@ function DisclosureEditor({
   );
 }
 
-export function PeersPage({ client }: { client: ApiClient | null }) {
+export function PeersPage({
+  client,
+  incomingInvite,
+  onInviteConsumed,
+}: {
+  client: ApiClient | null;
+  incomingInvite?: string | null;
+  onInviteConsumed?: () => void;
+}) {
   const users = useAppStore((state) => state.users);
   const [identity, setIdentity] = useState("");
   const [personalIdentity, setPersonalIdentity] = useState("");
-  const [ownPublicKey, setOwnPublicKey] = useState("");
   const [peers, setPeers] = useState<PeerRead[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [policy, setPolicy] = useState<PeerDisclosurePolicyRead | null>(null);
@@ -118,6 +127,10 @@ export function PeersPage({ client }: { client: ApiClient | null }) {
   const [personalAgentId, setPersonalAgentId] = useState("");
   const [aliases, setAliases] = useState("");
   const [publicKey, setPublicKey] = useState("");
+  const [ownInvite, setOwnInvite] = useState("");
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [inviteInput, setInviteInput] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
 
   const selectedPeer = useMemo(
     () => peers.find((peer) => peer.agent_id === selected) ?? null,
@@ -137,14 +150,15 @@ export function PeersPage({ client }: { client: ApiClient | null }) {
     if (!client) return;
     setError(null);
     try {
-      const [node, peerRows, personal] = await Promise.all([
+      const [node, peerRows, personal, card] = await Promise.all([
         client.getNodeIdentity(),
         client.listPeers(),
         users[0] ? client.getAgentIdentity(users[0].id) : Promise.resolve(null),
+        users[0] ? client.getIdentityCard(users[0].id) : Promise.resolve(null),
       ]);
       setIdentity(`${node.agent_id} / ${node.fingerprint}`);
       setPersonalIdentity(personal?.personal_agent_id ?? "");
-      setOwnPublicKey(personal?.public_key ?? node.public_key);
+      setOwnInvite(card ? encodeAgentInvite(card) : "");
       setPeers(peerRows);
       if (!selected && peerRows[0]) setSelected(peerRows[0].agent_id);
     } catch (err) {
@@ -155,6 +169,24 @@ export function PeersPage({ client }: { client: ApiClient | null }) {
   useEffect(() => {
     void load();
   }, [client, users]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!ownInvite) {
+      setQrDataUrl("");
+      return;
+    }
+    void QRCode.toDataURL(ownInvite, { width: 220, margin: 1, errorCorrectionLevel: "L" })
+      .then((url) => { if (!cancelled) setQrDataUrl(url); })
+      .catch((err: unknown) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
+    return () => { cancelled = true; };
+  }, [ownInvite]);
+
+  useEffect(() => {
+    if (!incomingInvite) return;
+    setInviteInput(incomingInvite);
+    setNotice("招待リンクを受け取りました。内容を検証してから承認待ちに追加してください。");
+  }, [incomingInvite]);
 
   useEffect(() => {
     if (!client || !selected) {
@@ -186,6 +218,26 @@ export function PeersPage({ client }: { client: ApiClient | null }) {
     });
   };
 
+  const registerInvite = async () => {
+    if (!client) return;
+    await runAction(async () => {
+      const card = decodeAgentInvite(inviteInput);
+      const peer = await client.createPeerFromCard(card);
+      setSelected(peer.agent_id);
+      setInviteInput("");
+      setNotice(`${peer.display_name}を承認待ちに追加しました。fingerprintを相手と照合してから信頼してください。`);
+      onInviteConsumed?.();
+      await load();
+    });
+  };
+
+  const copyInvite = async () => {
+    await runAction(async () => {
+      await navigator.clipboard.writeText(ownInvite);
+      setNotice("招待リンクをコピーしました。");
+    });
+  };
+
   const trust = async (peer: PeerRead) => {
     if (!client) return;
     await runAction(async () => {
@@ -210,15 +262,46 @@ export function PeersPage({ client }: { client: ApiClient | null }) {
   };
 
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem", maxWidth: 1100 }}>
-      <h1>接続相手</h1>
-      {error && <p style={{ color: "#c0392b" }}>{error}</p>}
-      <p>自分の代理AI: {personalIdentity || "確認中"}</p>
-      <p>この端末: {identity || "確認中"}</p>
-      {ownPublicKey && <p>共有する公開鍵: {ownPublicKey}</p>}
+    <main className="page peers-page">
+      <header className="page-header">
+        <div><p className="eyebrow">TRUSTED CONNECTIONS</p><h1>接続相手</h1><p className="subtitle">署名付きAgent Cardを交換し、fingerprintを確認して信頼を確定します。</p></div>
+      </header>
+      {error && <p className="alert error">{error}</p>}
+      {notice && <p className="peer-notice">{notice}</p>}
 
-      <section style={{ ...sectionStyle, marginBottom: "1rem" }}>
-        <h3 style={{ marginTop: 0 }}>ペアリング登録</h3>
+      <div className="peer-invite-grid">
+        <section className="panel peer-share-card">
+          <div><p className="eyebrow">MY AGENT CARD</p><h2>自分の名刺を共有</h2><p>QRを相手の端末で読み取るか、招待リンクを安全な既存チャネルで送ります。</p></div>
+          <div className="peer-share-body">
+            {qrDataUrl ? <img src={qrDataUrl} alt="自分のENISHI Agent Card QRコード" /> : <div className="peer-qr-placeholder">QR生成中</div>}
+            <dl className="peer-identity-facts">
+              <div><dt>代理AI</dt><dd>{personalIdentity || "確認中"}</dd></div>
+              <div><dt>端末 / fingerprint</dt><dd>{identity || "確認中"}</dd></div>
+            </dl>
+          </div>
+          <div className="peer-invite-link"><input readOnly value={ownInvite} aria-label="自分の招待リンク" /><button onClick={copyInvite} disabled={!ownInvite}>コピー</button></div>
+        </section>
+
+        <section className="panel peer-add-card">
+          <div><p className="eyebrow">ADD CONNECTION</p><h2>相手の名刺を受け取る</h2><p>リンク内の署名・Agent ID・公開鍵fingerprintをLocal Coreが検証します。追加後も信頼は未確定です。</p></div>
+          <textarea
+            rows={6}
+            placeholder="enishi://add/…"
+            value={inviteInput}
+            onChange={(event) => setInviteInput(event.target.value)}
+            aria-label="相手の招待リンク"
+          />
+          <button className="primary-button" onClick={registerInvite} disabled={!client || !inviteInput.trim()}>
+            署名を検証して承認待ちに追加
+          </button>
+          <small>リンクを開いて起動した場合も、自動で信頼せずこの確認画面で止まります。</small>
+        </section>
+      </div>
+
+      <details className="peer-manual-entry">
+        <summary>上級者向け: 公開鍵を手入力する</summary>
+        <section style={{ ...sectionStyle, marginTop: "0.75rem" }}>
+        <h3 style={{ marginTop: 0 }}>手動ペアリング登録</h3>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
           <input placeholder="端末Node ID" value={agentId} onChange={(e) => setAgentId(e.target.value)} />
           <input
@@ -246,9 +329,10 @@ export function PeersPage({ client }: { client: ApiClient | null }) {
             登録
           </button>
         </div>
-      </section>
+        </section>
+      </details>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(320px, 1fr) 1fr", gap: "1rem" }}>
+      <div className="peer-management-grid">
         <section style={sectionStyle}>
           <h3 style={{ marginTop: 0 }}>ピア一覧</h3>
           {peers.length === 0 && <p>登録済みピアがありません</p>}
@@ -281,10 +365,10 @@ export function PeersPage({ client }: { client: ApiClient | null }) {
           {selectedPeer && (
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <button onClick={() => trust(selectedPeer)} disabled={selectedPeer.status === "trusted"}>
-                trust
+                信頼する
               </button>
               <button onClick={() => block(selectedPeer)} disabled={selectedPeer.status === "blocked"}>
-                block
+                ブロック
               </button>
             </div>
           )}

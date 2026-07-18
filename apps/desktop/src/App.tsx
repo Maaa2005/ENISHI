@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { AgreementsPage } from "./pages/AgreementsPage";
 import { AgentSetupPage } from "./pages/AgentSetupPage";
 import { ApprovalsPage } from "./pages/ApprovalsPage";
@@ -13,6 +14,7 @@ import { ProjectsPage } from "./pages/ProjectsPage";
 import { TasksPage } from "./pages/TasksPage";
 import { ApiClient } from "./services/api";
 import { resolveCoreConnection, waitForCore } from "./services/backend";
+import { isAgentInvite } from "./services/invite";
 import { useAppStore } from "./stores/appStore";
 import "./styles.css";
 
@@ -52,6 +54,20 @@ export function App() {
   const [reconnectKey, setReconnectKey] = useState(0);
   const [tab, setTab] = useState<Tab>("home");
   const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null);
+  const [pendingInvite, setPendingInvite] = useState<string | null>(null);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    const acceptUrls = (urls: string[] | null) => {
+      const invite = urls?.find(isAgentInvite);
+      if (!invite) return;
+      setPendingInvite(invite);
+      setTab("peers");
+    };
+    void getCurrent().then(acceptUrls).catch(() => undefined);
+    void onOpenUrl(acceptUrls).then((stop) => { unlisten = stop; }).catch(() => undefined);
+    return () => unlisten?.();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -101,7 +117,13 @@ export function App() {
       {tab === "agentSetup" && (
         <AgentSetupPage client={client} onOpenPeers={() => setTab("peers")} />
       )}
-      {tab === "peers" && <PeersPage client={client} />}
+      {tab === "peers" && (
+        <PeersPage
+          client={client}
+          incomingInvite={pendingInvite}
+          onInviteConsumed={() => setPendingInvite(null)}
+        />
+      )}
       {tab === "negotiations" && <NegotiationsPage client={client} focusedSessionId={focusedSessionId} onOpenApprovals={() => setTab("approvals")} />}
       {tab === "agreements" && <AgreementsPage client={client} />}
       {tab === "approvals" && <ApprovalsPage client={client} onOpenNegotiation={(sessionId) => { setFocusedSessionId(sessionId); setTab("negotiations"); }} onOpenAgreements={() => setTab("agreements")} />}

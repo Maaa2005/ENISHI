@@ -21,6 +21,7 @@ pub fn run() {
     let app_state = AppState::new(CoreConnection { port, token }, child);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_deep_link::init())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![commands::get_core_connection])
         .build(tauri::generate_context!())
