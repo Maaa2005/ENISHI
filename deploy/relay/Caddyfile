@@ -1,0 +1,21 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$RELAY_DOMAIN} {
+	@metrics path /metrics
+	respond @metrics 404
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	reverse_proxy relay:8080 {
+		health_uri /ready
+		health_interval 10s
+		health_timeout 3s
+	}
+}

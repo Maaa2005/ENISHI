@@ -10,10 +10,11 @@ import logging
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from relay import __version__
 from relay.config import RelaySettings, get_relay_settings
+from relay.metrics import RelayMetrics
 from relay.store import MailboxBackend, MailboxStore, SqliteMailboxStore
 
 logger = logging.getLogger("enishi.relay")
@@ -67,11 +68,19 @@ def create_app(store: MailboxBackend | None = None) -> FastAPI:
             rate_limit_per_minute=settings.rate_limit_per_minute,
         )
 
-    app = FastAPI(title="ENISHI Relay", version=__version__)
+    app = FastAPI(
+        title="ENISHI Relay",
+        version=__version__,
+        docs_url="/docs" if settings.docs_enabled else None,
+        redoc_url="/redoc" if settings.docs_enabled else None,
+        openapi_url="/openapi.json" if settings.docs_enabled else None,
+    )
     app.state.store = mailbox
+    app.state.metrics = RelayMetrics()
 
     @app.exception_handler(RelayError)
     async def handle_relay_error(request: Request, exc: RelayError) -> JSONResponse:
+        request.app.state.metrics.rejected(exc.code)
         return JSONResponse(
             status_code=exc.status_code,
             content={
@@ -87,6 +96,29 @@ def create_app(store: MailboxBackend | None = None) -> FastAPI:
             "storage": mailbox.backend_name,
             "auth": settings.auth_mode(),
         }
+
+    @app.get("/ready")
+    def ready(request: Request) -> JSONResponse:
+        try:
+            mailbox.check_ready()
+        except Exception:
+            request.app.state.metrics.readiness_failed()
+            logger.exception("relay readiness check failed")
+            return JSONResponse(status_code=503, content={"status": "not_ready"})
+        return JSONResponse(
+            content={
+                "status": "ready",
+                "storage": mailbox.backend_name,
+                "auth": settings.auth_mode(),
+            }
+        )
+
+    @app.get("/metrics", include_in_schema=False)
+    def metrics() -> PlainTextResponse:
+        return PlainTextResponse(
+            app.state.metrics.render(mailbox.pending_count()),
+            media_type="text/plain; version=0.0.4",
+        )
 
     @app.post("/v1/messages", status_code=201)
     def post_message(
@@ -133,6 +165,7 @@ def create_app(store: MailboxBackend | None = None) -> FastAPI:
             )
 
         delivery_id = mailbox.put(receiver, envelope)
+        app.state.metrics.delivered()
         # ログは配送メタデータのみ。本文（payload/delta）は出力しない（§25）
         logger.info(
             "relay delivered message_id=%s sender=%s receiver=%s size=%d",
@@ -145,13 +178,15 @@ def create_app(store: MailboxBackend | None = None) -> FastAPI:
 
     @app.get("/v1/messages")
     def get_messages(agent_id: str = Depends(require_agent)) -> list[dict[str, Any]]:
+        messages = mailbox.fetch(agent_id)
+        app.state.metrics.fetched(len(messages))
         return [
             {
                 "delivery_id": m.delivery_id,
                 "envelope": m.envelope,
                 "stored_at": m.stored_at,
             }
-            for m in mailbox.fetch(agent_id)
+            for m in messages
         ]
 
     @app.post("/v1/messages/{delivery_id}/ack")
@@ -167,6 +202,7 @@ def create_app(store: MailboxBackend | None = None) -> FastAPI:
                 status_code=404,
                 details={"delivery_id": delivery_id},
             )
+        app.state.metrics.acknowledged()
         return {"acknowledged": True}
 
     return app

@@ -34,6 +34,10 @@ class MailboxBackend(Protocol):
 
     def ack(self, receiver: str, delivery_id: str) -> bool: ...
 
+    def check_ready(self) -> None: ...
+
+    def pending_count(self) -> int: ...
+
 
 @dataclass
 class MailboxStore:
@@ -91,6 +95,13 @@ class MailboxStore:
             return False
         self._mailboxes[receiver] = remaining
         return True
+
+    def check_ready(self) -> None:
+        """インメモリ実装は生成済みなら常に利用可能。"""
+
+    def pending_count(self) -> int:
+        self._purge()
+        return sum(len(messages) for messages in self._mailboxes.values())
 
 
 @dataclass
@@ -209,3 +220,17 @@ class SqliteMailboxStore:
                 (receiver, delivery_id),
             )
         return cursor.rowcount > 0
+
+    def check_ready(self) -> None:
+        """DBへ書き込みtransactionを開始でき、mailboxを読めることを確認する。"""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("SELECT COUNT(*) FROM messages").fetchone()
+            connection.rollback()
+
+    def pending_count(self) -> int:
+        now = float(self.clock())
+        with self._connect() as connection:
+            self._purge_messages(connection, now)
+            row = connection.execute("SELECT COUNT(*) FROM messages").fetchone()
+        return int(row[0]) if row is not None else 0

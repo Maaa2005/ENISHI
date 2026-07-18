@@ -41,6 +41,51 @@ def test_requires_authentication(client: TestClient) -> None:
     assert bad.json()["error"]["code"] == "RELAY_UNAUTHORIZED"
 
 
+def test_liveness_and_readiness_are_separate(client: TestClient) -> None:
+    assert client.get("/health").json()["status"] == "ok"
+    ready = client.get("/ready")
+    assert ready.status_code == 200
+    assert ready.json() == {
+        "status": "ready",
+        "storage": "memory",
+        "auth": "plaintext",
+    }
+
+
+def test_readiness_fails_closed_without_breaking_liveness(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_readiness() -> None:
+        raise RuntimeError("storage unavailable")
+
+    monkeypatch.setattr(client.app.state.store, "check_ready", fail_readiness)
+    assert client.get("/ready").status_code == 503
+    assert client.get("/ready").json() == {"status": "not_ready"}
+    assert client.get("/health").status_code == 200
+
+
+def test_metrics_are_aggregate_and_secret_free(
+    client: TestClient, headers_a: dict[str, str], headers_b: dict[str, str]
+) -> None:
+    client.get("/v1/messages", headers={"Authorization": "Bearer wrong"})
+    posted = client.post("/v1/messages", json=_envelope(), headers=headers_a)
+    delivery_id = posted.json()["delivery_id"]
+    client.get("/v1/messages", headers=headers_b)
+    client.post(f"/v1/messages/{delivery_id}/ack", headers=headers_b)
+
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    metrics = response.text
+    assert "enishi_relay_deliveries_total 1" in metrics
+    assert "enishi_relay_fetched_messages_total 1" in metrics
+    assert "enishi_relay_acknowledged_total 1" in metrics
+    assert "enishi_relay_pending_messages 0" in metrics
+    assert 'enishi_relay_rejections_total{code="RELAY_UNAUTHORIZED"} 1' in metrics
+    for secret in (SECRET_MARKER, "token-a", "token-b", AGENT_A, AGENT_B, "m001"):
+        assert secret not in metrics
+
+
 def test_hashed_tokens_authenticate_and_rotate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -100,6 +145,19 @@ def test_production_auth_requires_valid_hashes() -> None:
     malformed = RelaySettings(node_token_hashes=f"{AGENT_A}=not-a-sha256")
     with pytest.raises(ValueError, match="SHA-256"):
         malformed.validate_auth_configuration()
+
+
+def test_api_docs_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    from relay.config import get_relay_settings
+    from relay.main import create_app
+
+    monkeypatch.setenv("RELAY_DOCS_ENABLED", "false")
+    get_relay_settings.cache_clear()
+    with TestClient(create_app()) as production_client:
+        assert production_client.get("/docs").status_code == 404
+        assert production_client.get("/openapi.json").status_code == 404
+        assert production_client.get("/health").status_code == 200
+    get_relay_settings.cache_clear()
 
 
 def test_same_credential_cannot_belong_to_two_agents() -> None:

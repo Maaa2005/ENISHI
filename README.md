@@ -92,7 +92,7 @@ More detail is in [`docs/security.md`](docs/security.md).
 
 ## Status
 
-The presentation build is complete and demoable across two local nodes plus a relay. It includes the negotiation loop, node identity, selective disclosure, clone lifecycle, project-scoped AI tasks, the human-approval gate, agreements, and a privacy-safe audit trail. A fresh isolated presentation scenario starts with one command (see [`docs/demo.md`](docs/demo.md)). Production packaging now embeds Local Core as a self-contained macOS sidecar and includes the final ENISHI app icon, so the `.app` does not depend on a repository checkout, Python, or `uv` on the user's machine. The Relay now has a SQLite-backed mailbox, preserving unacknowledged deliveries, TTL expiry, and rate-limit state across restarts. Production authentication accepts only SHA-256 token digests, uses constant-time verification, and supports overlapping credentials for rotation. Remaining distribution work is code signing, notarization, update delivery, TLS, monitoring, and Relay operations.
+The presentation build is complete and demoable across two local nodes plus a relay. It includes the negotiation loop, node identity, selective disclosure, clone lifecycle, project-scoped AI tasks, the human-approval gate, agreements, and a privacy-safe audit trail. A fresh isolated presentation scenario starts with one command (see [`docs/demo.md`](docs/demo.md)). Production packaging now embeds Local Core as a self-contained macOS sidecar and includes the final ENISHI app icon, so the `.app` does not depend on a repository checkout, Python, or `uv` on the user's machine. The Relay now has a SQLite-backed mailbox, digest-only production authentication, separate liveness/readiness probes, aggregate Prometheus metrics, and a Caddy reference deployment for automatic TLS. Remaining distribution work is code signing, notarization, update delivery, hosted Relay rollout, alert integration, and backup/restore rehearsal.
 
 The real two-node pairing boundary is also executable as a self-check: `./scripts/run_pairing_e2e.sh` exchanges signed Agent Cards, proves that registration stops at `pending`, requires explicit fingerprint trust, sends a request through the Relay, waits for human approval, and confirms that both nodes persist the same canonical agreement.
 
@@ -172,7 +172,7 @@ RELAY_REQUIRE_HASHED_TOKENS=true
 RELAY_DATABASE_PATH=/var/lib/enishi-relay/relay.db
 ```
 
-To rotate without downtime, add the new digest as another entry for the same agent, deploy it, switch the node to the new plaintext token, then remove the old digest. Public deployment must terminate TLS before the Relay; never expose its HTTP listener directly to the internet.
+To rotate without downtime, add the new digest as another entry for the same agent, deploy it, switch the node to the new plaintext token, then remove the old digest. Public deployment must terminate TLS before the Relay; never expose its HTTP listener directly to the internet. [`deploy/relay/`](deploy/relay/) provides a Docker Compose + Caddy reference deployment with automatic certificates, internal-only Relay networking, readiness healthchecks, and a public `/metrics` block.
 
 ## Tests
 

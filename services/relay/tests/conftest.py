@@ -20,6 +20,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.delenv("RELAY_DATABASE_PATH", raising=False)
     monkeypatch.delenv("RELAY_NODE_TOKEN_HASHES", raising=False)
     monkeypatch.delenv("RELAY_REQUIRE_HASHED_TOKENS", raising=False)
+    monkeypatch.delenv("RELAY_DOCS_ENABLED", raising=False)
     get_relay_settings.cache_clear()
 
     from relay.main import create_app

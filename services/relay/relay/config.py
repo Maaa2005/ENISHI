@@ -19,6 +19,7 @@ class RelaySettings(BaseSettings):
     message_ttl_seconds: int = 3600
     max_message_bytes: int = 65536
     rate_limit_per_minute: int = 120
+    docs_enabled: bool = True
     # 空ならインメモリ。運用・デモではSQLiteファイルを明示する。
     database_path: str = ""
 

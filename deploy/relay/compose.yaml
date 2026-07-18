@@ -1,0 +1,62 @@
+services:
+  relay:
+    build:
+      context: ../..
+      dockerfile: deploy/relay/Dockerfile
+    restart: unless-stopped
+    environment:
+      RELAY_NODE_TOKENS: ""
+      RELAY_NODE_TOKEN_HASHES: ${RELAY_NODE_TOKEN_HASHES:?set Relay token hashes}
+      RELAY_REQUIRE_HASHED_TOKENS: "true"
+      RELAY_DATABASE_PATH: /var/lib/enishi-relay/relay.db
+      RELAY_DOCS_ENABLED: "false"
+      RELAY_MESSAGE_TTL_SECONDS: ${RELAY_MESSAGE_TTL_SECONDS:-3600}
+      RELAY_MAX_MESSAGE_BYTES: ${RELAY_MAX_MESSAGE_BYTES:-65536}
+      RELAY_RATE_LIMIT_PER_MINUTE: ${RELAY_RATE_LIMIT_PER_MINUTE:-120}
+    expose:
+      - "8080"
+    volumes:
+      - relay-data:/var/lib/enishi-relay
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - relay-backend
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      relay:
+        condition: service_healthy
+    environment:
+      RELAY_DOMAIN: ${RELAY_DOMAIN:?set Relay domain}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME email}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - relay-backend
+      - edge
+
+volumes:
+  relay-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  relay-backend:
+    name: enishi-relay-backend
+    internal: true
+  edge:
