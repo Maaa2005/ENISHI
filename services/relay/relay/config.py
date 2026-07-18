@@ -13,6 +13,8 @@ class RelaySettings(BaseSettings):
     message_ttl_seconds: int = 3600
     max_message_bytes: int = 65536
     rate_limit_per_minute: int = 120
+    # 空ならインメモリ。運用・デモではSQLiteファイルを明示する。
+    database_path: str = ""
 
     def token_map(self) -> dict[str, str]:
         """トークン→agent_id の対応表を返す。"""

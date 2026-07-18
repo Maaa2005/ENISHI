@@ -46,6 +46,7 @@ Each user runs a local node. Two nodes talk through a relay that only forwards m
          │                              │
          └──────────► Relay ◄───────────┘
               (forward-only: TTL,
+               durable mailbox,
                destination authz,
                size/rate limits,
                minimal logging)
@@ -91,7 +92,7 @@ More detail is in [`docs/security.md`](docs/security.md).
 
 ## Status
 
-The presentation build is complete and demoable across two local nodes plus a relay. It includes the negotiation loop, node identity, selective disclosure, clone lifecycle, project-scoped AI tasks, the human-approval gate, agreements, and a privacy-safe audit trail. A fresh isolated presentation scenario starts with one command (see [`docs/demo.md`](docs/demo.md)). Production packaging now embeds Local Core as a self-contained macOS sidecar and includes the final ENISHI app icon, so the `.app` does not depend on a repository checkout, Python, or `uv` on the user's machine. Remaining distribution work is code signing, notarization, update delivery, and live relay operation.
+The presentation build is complete and demoable across two local nodes plus a relay. It includes the negotiation loop, node identity, selective disclosure, clone lifecycle, project-scoped AI tasks, the human-approval gate, agreements, and a privacy-safe audit trail. A fresh isolated presentation scenario starts with one command (see [`docs/demo.md`](docs/demo.md)). Production packaging now embeds Local Core as a self-contained macOS sidecar and includes the final ENISHI app icon, so the `.app` does not depend on a repository checkout, Python, or `uv` on the user's machine. The Relay now has a SQLite-backed mailbox, preserving unacknowledged deliveries, TTL expiry, and rate-limit state across restarts. Remaining distribution work is code signing, notarization, update delivery, and deployment-grade Relay authentication, TLS, monitoring, and operations.
 
 The real two-node pairing boundary is also executable as a self-check: `./scripts/run_pairing_e2e.sh` exchanges signed Agent Cards, proves that registration stops at `pending`, requires explicit fingerprint trust, sends a request through the Relay, waits for human approval, and confirms that both nodes persist the same canonical agreement.
 
@@ -110,7 +111,7 @@ Design notes in this repo:
 - `apps/desktop/` — Tauri 2 + React + TypeScript desktop app
 - `services/local-core/` — FastAPI Local Core (127.0.0.1 only, bearer auth required)
 - `services/enishi-mcp/` — thin stdio MCP-to-Local-Core control plane
-- `services/relay/` — forward-only relay server
+- `services/relay/` — forward-only relay server with a persistent SQLite mailbox
 - `packages/protocol/` — AUN Protocol message schemas (JSON Schema)
 - `scripts/` — environment checks and dev helpers
 

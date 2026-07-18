@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 
 from relay import __version__
 from relay.config import RelaySettings, get_relay_settings
-from relay.store import MailboxStore
+from relay.store import MailboxBackend, MailboxStore, SqliteMailboxStore
 
 logger = logging.getLogger("enishi.relay")
 
@@ -50,12 +50,21 @@ def require_agent(authorization: str | None = Header(default=None)) -> str:
     return agent_id
 
 
-def create_app(store: MailboxStore | None = None) -> FastAPI:
+def create_app(store: MailboxBackend | None = None) -> FastAPI:
     settings: RelaySettings = get_relay_settings()
-    mailbox = store or MailboxStore(
-        ttl_seconds=settings.message_ttl_seconds,
-        rate_limit_per_minute=settings.rate_limit_per_minute,
-    )
+    if store is not None:
+        mailbox = store
+    elif settings.database_path:
+        mailbox = SqliteMailboxStore(
+            database_path=settings.database_path,
+            ttl_seconds=settings.message_ttl_seconds,
+            rate_limit_per_minute=settings.rate_limit_per_minute,
+        )
+    else:
+        mailbox = MailboxStore(
+            ttl_seconds=settings.message_ttl_seconds,
+            rate_limit_per_minute=settings.rate_limit_per_minute,
+        )
 
     app = FastAPI(title="ENISHI Relay", version=__version__)
     app.state.store = mailbox
@@ -71,7 +80,11 @@ def create_app(store: MailboxStore | None = None) -> FastAPI:
 
     @app.get("/health")
     def health() -> dict[str, str]:
-        return {"status": "ok", "version": __version__}
+        return {
+            "status": "ok",
+            "version": __version__,
+            "storage": mailbox.backend_name,
+        }
 
     @app.post("/v1/messages", status_code=201)
     def post_message(

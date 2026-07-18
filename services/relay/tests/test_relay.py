@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -124,6 +125,58 @@ def test_ttl_expiry() -> None:
 
     fake_now[0] = 1061.0  # TTL経過
     assert store.fetch(AGENT_B) == []
+
+
+def test_sqlite_mailbox_survives_restart(tmp_path: Path) -> None:
+    from relay.store import SqliteMailboxStore
+
+    database = tmp_path / "relay.db"
+    first = SqliteMailboxStore(database, ttl_seconds=60, rate_limit_per_minute=10)
+    delivery_id = first.put(AGENT_B, {"message_id": "persistent"})
+
+    restarted = SqliteMailboxStore(database, ttl_seconds=60, rate_limit_per_minute=10)
+    fetched = restarted.fetch(AGENT_B)
+    assert [message.delivery_id for message in fetched] == [delivery_id]
+    assert fetched[0].envelope == {"message_id": "persistent"}
+
+    assert restarted.ack(AGENT_B, delivery_id) is True
+    after_second_restart = SqliteMailboxStore(database)
+    assert after_second_restart.fetch(AGENT_B) == []
+
+
+def test_sqlite_ttl_and_rate_limit_survive_restart(tmp_path: Path) -> None:
+    from relay.store import SqliteMailboxStore
+
+    fake_now = [1000.0]
+    database = tmp_path / "relay.db"
+    first = SqliteMailboxStore(
+        database,
+        ttl_seconds=60,
+        rate_limit_per_minute=1,
+        clock=lambda: fake_now[0],
+    )
+    first.put(AGENT_B, {"message_id": "expires"})
+    assert first.allow_send(AGENT_A) is True
+
+    restarted = SqliteMailboxStore(
+        database,
+        ttl_seconds=60,
+        rate_limit_per_minute=1,
+        clock=lambda: fake_now[0],
+    )
+    assert restarted.allow_send(AGENT_A) is False
+    fake_now[0] = 1060.0
+    assert restarted.fetch(AGENT_B) == []
+    assert restarted.allow_send(AGENT_A) is True
+
+
+def test_sqlite_ack_is_scoped_to_receiver(tmp_path: Path) -> None:
+    from relay.store import SqliteMailboxStore
+
+    store = SqliteMailboxStore(tmp_path / "relay.db")
+    delivery_id = store.put(AGENT_B, {"message_id": "m1"})
+    assert store.ack(AGENT_A, delivery_id) is False
+    assert len(store.fetch(AGENT_B)) == 1
 
 
 def test_logs_do_not_contain_message_body(

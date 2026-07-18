@@ -27,6 +27,7 @@ AGENT_B="$(agent_id_for "$DEMO_ROOT/user-b")"
 cd "$ROOT_DIR/services/relay"
 
 export RELAY_NODE_TOKENS="${RELAY_NODE_TOKENS:-${AGENT_A}=relay-token-a,${AGENT_B}=relay-token-b}"
+export RELAY_DATABASE_PATH="${RELAY_DATABASE_PATH:-$DEMO_ROOT/relay/relay.db}"
 export RELAY_MESSAGE_TTL_SECONDS="${RELAY_MESSAGE_TTL_SECONDS:-3600}"
 export RELAY_RATE_LIMIT_PER_MINUTE="${RELAY_RATE_LIMIT_PER_MINUTE:-120}"
 PORT="${RELAY_PORT:-8870}"

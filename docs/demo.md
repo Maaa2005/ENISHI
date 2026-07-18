@@ -87,7 +87,7 @@ Or start them all at once:
 | User A | `http://127.0.0.1:8871` | `demo-token-a` | `.tmp/demo-user-a` |
 | User B | `http://127.0.0.1:8872` | `demo-token-b` | `.tmp/demo-user-b` |
 
-Each Local Core uses its own SQLite database, key, and data directory. The relay reads the real agent IDs from the current demo data directory and sets `RELAY_NODE_TOKENS` automatically.
+Each Local Core uses its own SQLite database, key, and data directory. The relay reads the real agent IDs from the current demo data directory, sets `RELAY_NODE_TOKENS` automatically, and stores pending deliveries in `.tmp/demo-current/relay/relay.db`. Set `RELAY_DATABASE_PATH` to choose a different Relay database. The SQLite mailbox preserves unacknowledged messages, TTL expiry, and rate-limit counters across Relay restarts.
 
 ## Pairing
 
