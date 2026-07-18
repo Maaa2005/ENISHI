@@ -18,6 +18,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.setenv("RELAY_MAX_MESSAGE_BYTES", "2048")
     monkeypatch.setenv("RELAY_RATE_LIMIT_PER_MINUTE", "5")
     monkeypatch.delenv("RELAY_DATABASE_PATH", raising=False)
+    monkeypatch.delenv("RELAY_NODE_TOKEN_HASHES", raising=False)
+    monkeypatch.delenv("RELAY_REQUIRE_HASHED_TOKENS", raising=False)
     get_relay_settings.cache_clear()
 
     from relay.main import create_app

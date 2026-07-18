@@ -24,14 +24,26 @@ agent_id_for() {
 AGENT_A="$(agent_id_for "$DEMO_ROOT/user-a")"
 AGENT_B="$(agent_id_for "$DEMO_ROOT/user-b")"
 
+token_hash() {
+  "$PYTHON" -c 'import hashlib, sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest())' "$1"
+}
+
 cd "$ROOT_DIR/services/relay"
 
-export RELAY_NODE_TOKENS="${RELAY_NODE_TOKENS:-${AGENT_A}=relay-token-a,${AGENT_B}=relay-token-b}"
+if [ "${RELAY_REQUIRE_HASHED_TOKENS:-false}" = "true" ]; then
+  export RELAY_NODE_TOKENS=""
+  export RELAY_NODE_TOKEN_HASHES="${RELAY_NODE_TOKEN_HASHES:-${AGENT_A}=$(token_hash relay-token-a),${AGENT_B}=$(token_hash relay-token-b)}"
+  AUTH_MODE="hashed"
+else
+  export RELAY_NODE_TOKENS="${RELAY_NODE_TOKENS:-${AGENT_A}=relay-token-a,${AGENT_B}=relay-token-b}"
+  AUTH_MODE="plaintext-demo"
+fi
 export RELAY_DATABASE_PATH="${RELAY_DATABASE_PATH:-$DEMO_ROOT/relay/relay.db}"
 export RELAY_MESSAGE_TTL_SECONDS="${RELAY_MESSAGE_TTL_SECONDS:-3600}"
 export RELAY_RATE_LIMIT_PER_MINUTE="${RELAY_RATE_LIMIT_PER_MINUTE:-120}"
 PORT="${RELAY_PORT:-8870}"
 
 echo "ENISHI Relay demo: http://127.0.0.1:${PORT}"
-echo "agents: ${RELAY_NODE_TOKENS}"
+echo "agents: ${AGENT_A},${AGENT_B}"
+echo "auth: ${AUTH_MODE}"
 exec "$PYTHON" -m uvicorn relay.main:app --host 127.0.0.1 --port "$PORT" --log-level warning

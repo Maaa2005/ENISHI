@@ -35,12 +35,12 @@ class RelayError(Exception):
 
 
 def require_agent(authorization: str | None = Header(default=None)) -> str:
-    """Bearerトークンをnode_tokensと照合し、対応するagent_idを返す。"""
+    """Bearerトークンを定数時間で照合し、対応するagent_idを返す。"""
     settings = get_relay_settings()
     provided = ""
     if authorization is not None and authorization.startswith("Bearer "):
         provided = authorization.removeprefix("Bearer ")
-    agent_id = settings.token_map().get(provided)
+    agent_id = settings.authenticate(provided)
     if not provided or agent_id is None:
         raise RelayError(
             code="RELAY_UNAUTHORIZED",
@@ -52,6 +52,7 @@ def require_agent(authorization: str | None = Header(default=None)) -> str:
 
 def create_app(store: MailboxBackend | None = None) -> FastAPI:
     settings: RelaySettings = get_relay_settings()
+    settings.validate_auth_configuration()
     if store is not None:
         mailbox = store
     elif settings.database_path:
@@ -84,6 +85,7 @@ def create_app(store: MailboxBackend | None = None) -> FastAPI:
             "status": "ok",
             "version": __version__,
             "storage": mailbox.backend_name,
+            "auth": settings.auth_mode(),
         }
 
     @app.post("/v1/messages", status_code=201)

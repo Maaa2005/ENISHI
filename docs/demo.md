@@ -66,6 +66,9 @@ This starts a fresh Relay and two isolated Local Cores, exchanges signed
 checks the fingerprints, explicitly establishes trust, sends an agent request,
 approves it, and confirms that both nodes persist the same agreement. All
 processes and temporary ports are stopped automatically after the check.
+Set `RELAY_REQUIRE_HASHED_TOKENS=true` when running the command to exercise the
+same two-node flow with digest-only Relay configuration. The launcher still
+uses isolated demo credentials and never prints their plaintext or hashes.
 
 Run three processes in three terminals:
 

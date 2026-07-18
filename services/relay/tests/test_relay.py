@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from pathlib import Path
 
@@ -38,6 +39,78 @@ def test_requires_authentication(client: TestClient) -> None:
     bad = client.get("/v1/messages", headers={"Authorization": "Bearer wrong"})
     assert bad.status_code == 401
     assert bad.json()["error"]["code"] == "RELAY_UNAUTHORIZED"
+
+
+def test_hashed_tokens_authenticate_and_rotate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from relay.config import get_relay_settings
+    from relay.main import create_app
+
+    old_token = "old-token-for-a"
+    new_token = "new-token-for-a"
+    token_b = "token-for-b"
+    hashes = ",".join(
+        [
+            f"{AGENT_A}={hashlib.sha256(old_token.encode()).hexdigest()}",
+            f"{AGENT_A}={hashlib.sha256(new_token.encode()).hexdigest()}",
+            f"{AGENT_B}={hashlib.sha256(token_b.encode()).hexdigest()}",
+        ]
+    )
+    monkeypatch.setenv("RELAY_NODE_TOKENS", "")
+    monkeypatch.setenv("RELAY_NODE_TOKEN_HASHES", hashes)
+    monkeypatch.setenv("RELAY_REQUIRE_HASHED_TOKENS", "true")
+    get_relay_settings.cache_clear()
+
+    with TestClient(create_app()) as hashed_client:
+        assert hashed_client.get("/health").json()["auth"] == "hashed"
+        for token in (old_token, new_token):
+            response = hashed_client.post(
+                "/v1/messages",
+                json=_envelope(),
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert response.status_code == 201
+        fetched = hashed_client.get(
+            "/v1/messages", headers={"Authorization": f"Bearer {token_b}"}
+        )
+        assert len(fetched.json()) == 2
+
+    get_relay_settings.cache_clear()
+
+
+def test_production_auth_rejects_plaintext_tokens() -> None:
+    from relay.config import RelaySettings
+
+    settings = RelaySettings(
+        node_tokens=f"{AGENT_A}=plain-token",
+        require_hashed_tokens=True,
+    )
+    with pytest.raises(ValueError, match="RELAY_NODE_TOKENS"):
+        settings.validate_auth_configuration()
+
+
+def test_production_auth_requires_valid_hashes() -> None:
+    from relay.config import RelaySettings
+
+    missing = RelaySettings(require_hashed_tokens=True)
+    with pytest.raises(ValueError, match="RELAY_NODE_TOKEN_HASHESが必要"):
+        missing.validate_auth_configuration()
+
+    malformed = RelaySettings(node_token_hashes=f"{AGENT_A}=not-a-sha256")
+    with pytest.raises(ValueError, match="SHA-256"):
+        malformed.validate_auth_configuration()
+
+
+def test_same_credential_cannot_belong_to_two_agents() -> None:
+    from relay.config import RelaySettings
+
+    digest = hashlib.sha256(b"shared-token").hexdigest()
+    settings = RelaySettings(
+        node_token_hashes=f"{AGENT_A}={digest},{AGENT_B}={digest}"
+    )
+    with pytest.raises(ValueError, match="複数agent"):
+        settings.validate_auth_configuration()
 
 
 def test_put_fetch_ack_flow(

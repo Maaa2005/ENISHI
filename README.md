@@ -92,7 +92,7 @@ More detail is in [`docs/security.md`](docs/security.md).
 
 ## Status
 
-The presentation build is complete and demoable across two local nodes plus a relay. It includes the negotiation loop, node identity, selective disclosure, clone lifecycle, project-scoped AI tasks, the human-approval gate, agreements, and a privacy-safe audit trail. A fresh isolated presentation scenario starts with one command (see [`docs/demo.md`](docs/demo.md)). Production packaging now embeds Local Core as a self-contained macOS sidecar and includes the final ENISHI app icon, so the `.app` does not depend on a repository checkout, Python, or `uv` on the user's machine. The Relay now has a SQLite-backed mailbox, preserving unacknowledged deliveries, TTL expiry, and rate-limit state across restarts. Remaining distribution work is code signing, notarization, update delivery, and deployment-grade Relay authentication, TLS, monitoring, and operations.
+The presentation build is complete and demoable across two local nodes plus a relay. It includes the negotiation loop, node identity, selective disclosure, clone lifecycle, project-scoped AI tasks, the human-approval gate, agreements, and a privacy-safe audit trail. A fresh isolated presentation scenario starts with one command (see [`docs/demo.md`](docs/demo.md)). Production packaging now embeds Local Core as a self-contained macOS sidecar and includes the final ENISHI app icon, so the `.app` does not depend on a repository checkout, Python, or `uv` on the user's machine. The Relay now has a SQLite-backed mailbox, preserving unacknowledged deliveries, TTL expiry, and rate-limit state across restarts. Production authentication accepts only SHA-256 token digests, uses constant-time verification, and supports overlapping credentials for rotation. Remaining distribution work is code signing, notarization, update delivery, TLS, monitoring, and Relay operations.
 
 The real two-node pairing boundary is also executable as a self-check: `./scripts/run_pairing_e2e.sh` exchanges signed Agent Cards, proves that registration stops at `pending`, requires explicit fingerprint trust, sends a request through the Relay, waits for human approval, and confirms that both nodes persist the same canonical agreement.
 
@@ -155,6 +155,24 @@ Run the Local Core on its own for API development:
 ./scripts/dev_core.sh   # http://127.0.0.1:8765
 npm run dev             # Vite dev server (http://localhost:5173)
 ```
+
+### Production Relay authentication
+
+Generate a high-entropy bearer token and its SHA-256 digest. The plaintext token is shown once and belongs only on the client node; configure only the digest on the Relay:
+
+```bash
+uv run --project services/relay python -m relay.token_tool --generate
+```
+
+Configure one or more node identities and require hashed credentials:
+
+```text
+RELAY_NODE_TOKEN_HASHES=agt_node_a=<sha256>,agt_node_b=<sha256>
+RELAY_REQUIRE_HASHED_TOKENS=true
+RELAY_DATABASE_PATH=/var/lib/enishi-relay/relay.db
+```
+
+To rotate without downtime, add the new digest as another entry for the same agent, deploy it, switch the node to the new plaintext token, then remove the old digest. Public deployment must terminate TLS before the Relay; never expose its HTTP listener directly to the internet.
 
 ## Tests
 
