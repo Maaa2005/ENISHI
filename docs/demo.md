@@ -22,7 +22,7 @@ Local Cores, and the Relay.
 
 The prepared story is:
 
-1. Sato's agent asks Nakamura's agent for a 30-minute ENISHI progress meeting.
+1. Mizuno's agent asks Nakamura's agent for a 30-minute ENISHI progress meeting.
 2. The agents compare availability without sending either raw calendar.
 3. Nakamura's relationship policy stops the agent before it commits.
 4. Approve it in **Approvals**. The UI updates the pending badge immediately
@@ -55,6 +55,18 @@ previous run cannot make the presentation appear empty.
 
 ## Manual developer demo
 
+To verify the real pairing boundary without opening the UI, run:
+
+```bash
+./scripts/run_pairing_e2e.sh
+```
+
+This starts a fresh Relay and two isolated Local Cores, exchanges signed
+`enishi-card/2` cards, proves each card first creates only a `pending` peer,
+checks the fingerprints, explicitly establishes trust, sends an agent request,
+approves it, and confirms that both nodes persist the same agreement. All
+processes and temporary ports are stopped automatically after the check.
+
 Run three processes in three terminals:
 
 ```bash
@@ -79,7 +91,8 @@ Each Local Core uses its own SQLite database, key, and data directory. The relay
 
 ## Pairing
 
-Read each node's public key:
+The automated demo exchanges signed Agent Cards. For low-level API debugging,
+read each node's public key:
 
 ```bash
 curl -s -H "Authorization: Bearer demo-token-a" \

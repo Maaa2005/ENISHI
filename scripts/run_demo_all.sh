@@ -62,6 +62,14 @@ wait_for_health "User B" "http://127.0.0.1:${ENISHI_DEMO_USER_B_PORT}/health"
 "${ENISHI_PYTHON:-$ROOT_DIR/.venv/bin/python}" "$ROOT_DIR/scripts/seed_demo.py"
 "${ENISHI_PYTHON:-$ROOT_DIR/.venv/bin/python}" "$ROOT_DIR/scripts/verify_demo.py"
 
+if [ "${ENISHI_DEMO_VERIFY_PAIRING:-0}" = "1" ]; then
+  "${ENISHI_PYTHON:-$ROOT_DIR/.venv/bin/python}" "$ROOT_DIR/scripts/verify_pairing_e2e.py"
+fi
+
+if [ "${ENISHI_DEMO_EXIT_AFTER_VERIFY:-0}" = "1" ]; then
+  exit 0
+fi
+
 if [ "${ENISHI_DEMO_UI:-0}" = "1" ]; then
   (
     cd "$ROOT_DIR/apps/desktop"

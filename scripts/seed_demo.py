@@ -109,21 +109,24 @@ def activate_clone(node: Node, user_id: str) -> dict[str, Any]:
     return node.request(f"/v1/clones/{clone['id']}/activate", method="POST")
 
 
-def connect(node: Node, peer: dict[str, Any], display_name: str, aliases: list[str]) -> None:
-    node.request(
-        "/v1/peers",
+def connect_from_card(
+    node: Node,
+    peer_card: dict[str, Any],
+) -> dict[str, Any]:
+    peer = node.request(
+        "/v1/peers/from-card",
         method="POST",
-        body={
-            "agent_id": peer["node_id"],
-            "personal_agent_id": peer["personal_agent_id"],
-            "display_name": display_name,
-            "aliases": aliases,
-            "public_key": peer["public_key"],
-        },
+        body={"card": peer_card},
     )
-    node.request(f"/v1/peers/{peer['node_id']}/trust", method="POST")
+    if peer["status"] != "pending":
+        raise RuntimeError(f"{node.name} accepted an Agent Card without a pending gate: {peer}")
+    if peer["fingerprint"] != peer_card["fingerprint"]:
+        raise RuntimeError(f"{node.name} stored a fingerprint that differs from the signed card")
+    trusted = node.request(f"/v1/peers/{peer['agent_id']}/trust", method="POST")
+    if trusted["status"] != "trusted":
+        raise RuntimeError(f"{node.name} did not establish trust after explicit confirmation")
     node.request(
-        f"/v1/peers/{peer['node_id']}/disclosure",
+        f"/v1/peers/{peer['agent_id']}/disclosure",
         method="PUT",
         body={
             "allowed_memory_types": ["schedule", "preference"],
@@ -133,6 +136,7 @@ def connect(node: Node, peer: dict[str, Any], display_name: str, aliases: list[s
             "extra": {},
         },
     )
+    return trusted
 
 
 def wait_for_pending_approval(node: Node, attempts: int = 30) -> dict[str, Any]:
@@ -200,6 +204,8 @@ def main() -> None:
     user_b = create_user(user_b_node, "水野先生")
     identity_a = user_a_node.request(f"/v1/agent/identity?user_id={user_a['id']}")
     identity_b = user_b_node.request(f"/v1/agent/identity?user_id={user_b['id']}")
+    card_a = user_a_node.request(f"/v1/agent/card?user_id={user_a['id']}")
+    card_b = user_b_node.request(f"/v1/agent/card?user_id={user_b['id']}")
 
     seed_profile(
         user_a_node,
@@ -217,8 +223,8 @@ def main() -> None:
     activate_clone(user_b_node, user_b["id"])
     project, task = seed_project_task(user_a_node, user_a["id"], clone_a["id"])
 
-    connect(user_a_node, identity_b, "水野先生の代理AI", ["水野先生", "水野さん"])
-    connect(user_b_node, identity_a, "中村さんの代理AI", ["中村さん", "中村"])
+    connect_from_card(user_a_node, card_b)
+    connect_from_card(user_b_node, card_a)
     for node, user in ((user_a_node, user_a), (user_b_node, user_b)):
         node.request(
             "/v1/policies/delegation",
@@ -247,6 +253,7 @@ def main() -> None:
     print(f"  Request:  {request_text}")
     print(f"  Session:  {negotiation['id']}")
     print(f"  Approval: {approval['id']} (pending on User A)")
+    print("  Pairing:  signed Agent Card -> pending -> fingerprint check -> trusted")
     print(f"  Project:  {project['name']} (trusted, restricted permissions)")
     print(f"  AI task:  {task['id']} (completed with mock provider)")
     print("  Privacy:  raw calendar and private memory are not sent")

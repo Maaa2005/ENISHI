@@ -431,6 +431,11 @@ def _create_remote_agreement(
     return agreement
 
 
+def _meeting_agreement_payload(selected_slot: dict[str, Any]) -> dict[str, Any]:
+    """両ノードで一致する、合意そのものだけをwire由来データから構成する。"""
+    return {"selected_slot": dict(selected_slot)}
+
+
 def _record_decision(
     session_db: Session,
     negotiation: NegotiationSession,
@@ -668,7 +673,9 @@ def resolve_remote_approval(
     if approved and message_type == "ACCEPT":
         negotiation.status = NegotiationStatus.AGREED.value
         negotiation.result = {"selected_slot": selected_slot, "approved_by_human": True}
-        _create_remote_agreement(session_db, negotiation, negotiation.result)
+        _create_remote_agreement(
+            session_db, negotiation, _meeting_agreement_payload(selected_slot)
+        )
     elif approved:
         negotiation.status = NegotiationStatus.OPEN.value
         negotiation.result = {"counter_approved_by_human": True}
@@ -810,7 +817,9 @@ def _handle_envelope(
             )
             negotiation.status = NegotiationStatus.AGREED.value
             negotiation.result = {"selected_slot": selected, "rounds": rounds}
-            _create_remote_agreement(session_db, negotiation, negotiation.result)
+            _create_remote_agreement(
+                session_db, negotiation, _meeting_agreement_payload(selected)
+            )
         elif rounds < protocol_state.MAX_COUNTER_ROUNDS:
             _send_reply(
                 session_db, relay, negotiation, sender_personal_id, sender, sender_node,
@@ -832,7 +841,11 @@ def _handle_envelope(
             "selected_slot": dict(envelope.get("delta", {}).get("selected_slot", {})),
             "rounds": _counter_rounds(session_db, session_id) + 1,
         }
-        _create_remote_agreement(session_db, negotiation, negotiation.result)
+        _create_remote_agreement(
+            session_db,
+            negotiation,
+            _meeting_agreement_payload(negotiation.result["selected_slot"]),
+        )
     elif message_type in ("REJECT", "ERROR"):
         negotiation.status = NegotiationStatus.FAILED.value
         negotiation.result = {

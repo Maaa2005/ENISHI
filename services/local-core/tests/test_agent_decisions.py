@@ -159,6 +159,7 @@ def test_remote_low_confidence_waits_for_human_and_responds_once(
 ) -> None:
     from enishi_core.database import get_session
     from enishi_core.models import (
+        Agreement,
         NegotiationDecision,
         NegotiationSession,
         PeerAgent,
@@ -286,6 +287,17 @@ def test_remote_low_confidence_waits_for_human_and_responds_once(
         negotiation = session.get(NegotiationSession, session_id)
         assert negotiation is not None
         assert negotiation.status == expected_status
+        agreement = session.query(Agreement).filter_by(session_id=session_id).first()
+        if expected_status == "agreed":
+            assert agreement is not None
+            assert agreement.agreed_payload == {
+                "selected_slot": {
+                    "start": "2026-07-20T13:00+09:00",
+                    "end": "2026-07-20T13:30+09:00",
+                }
+            }
+        else:
+            assert agreement is None
         peer = session.get(PeerAgent, sender_identity.agent_id)
         assert peer is not None
     finally:
