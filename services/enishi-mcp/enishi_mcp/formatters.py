@@ -7,9 +7,12 @@ import json
 from typing import Any
 
 
-def _untrusted(value: Any) -> str:
-    text = str(value).replace("\n", " ").strip()
-    return f"`[UNTRUSTED CONTENT] {text[:300]}`"
+def _untrusted(value: Any, *, limit: int = 300) -> str:
+    """相手由来の値をMarkdown構文として解釈できないJSON文字列にする。"""
+    text = str(value).replace("\r", " ").replace("\n", " ").strip()[:limit]
+    # JSONは改行などをescapeする。backtickも明示的にescapeしてinline codeを閉じさせない。
+    encoded = json.dumps(text, ensure_ascii=False).replace("`", r"\u0060")
+    return f"`[UNTRUSTED CONTENT] {encoded}`"
 
 
 def peers_markdown(items: list[dict[str, Any]]) -> str:
@@ -37,13 +40,9 @@ def negotiations_markdown(items: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def negotiation_markdown(
-    negotiation: dict[str, Any], messages: list[dict[str, Any]]
-) -> str:
+def negotiation_markdown(negotiation: dict[str, Any], messages: list[dict[str, Any]]) -> str:
     next_action = (
-        "UIで承認を確認"
-        if negotiation.get("pending_approval_id")
-        else "返答または完了を待つ"
+        "UIで承認を確認" if negotiation.get("pending_approval_id") else "返答または完了を待つ"
     )
     lines = [
         f"# 交渉 `{negotiation.get('id')}`",
@@ -63,8 +62,9 @@ def negotiation_markdown(
             sort_keys=True,
         )
         lines.append(
-            f"- {message.get('message_type')} / sender `{message.get('sender_agent_id')}`\n"
-            f"    [UNTRUSTED CONTENT] {content[:1000]}"
+            f"- 種別 {_untrusted(message.get('message_type', ''))} / "
+            f"sender {_untrusted(message.get('sender_agent_id', ''))}\n"
+            f"    {_untrusted(content, limit=1000)}"
         )
     return "\n".join(lines)
 
