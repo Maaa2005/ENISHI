@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python and Relay deployment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.29"
+          enable-cache: true
+      - name: Install Python
+        run: uv python install 3.12
+      - name: Sync workspace
+        run: uv sync --locked --all-packages --all-groups
+      - name: Test
+        run: uv run pytest -q
+      - name: Ruff
+        run: uv run ruff check .
+      - name: Mypy
+        run: uv run mypy services/local-core/enishi_core services/relay/relay services/enishi-mcp/enishi_mcp
+      - name: Validate Relay deployment
+        run: docker compose --env-file deploy/relay/.env.example -f deploy/relay/compose.yaml config --quiet
+
+  desktop:
+    name: Desktop frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build --workspace apps/desktop
+
+  rust:
+    name: Tauri Rust
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: apps/desktop/src-tauri
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain versions
+        run: rustc --version && cargo --version
+      - name: Check lockfile
+        run: cargo metadata --locked --format-version 1 --no-deps > /dev/null
+      - name: Test
+        run: cargo test --locked
+      - name: Check
+        run: cargo check --locked
