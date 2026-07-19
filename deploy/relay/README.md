@@ -33,7 +33,9 @@ directly from `relay-backend`.
 `/health` proves that the process is alive. `/ready` additionally opens a
 SQLite write transaction and reads the mailbox table; load balancers should
 route traffic only when it returns `200`. The container healthcheck uses
-`/ready`.
+`/ready`. The image resolves production dependencies from the repository's
+`uv.lock` and installs them with hashes, so a rebuild cannot silently select
+newer packages.
 
 ## Monitoring
 

@@ -35,6 +35,8 @@ def test_relay_container_runs_unprivileged_with_readiness_healthcheck() -> None:
     assert "HEALTHCHECK" in dockerfile
     assert "http://127.0.0.1:8080/ready" in dockerfile
     assert '"--no-server-header"' in dockerfile
+    assert "uv export --quiet --locked --package enishi-relay" in dockerfile
+    assert "pip install --no-cache-dir --require-hashes" in dockerfile
 
 
 def test_prometheus_alerts_cover_core_failure_modes() -> None:

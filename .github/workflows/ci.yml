@@ -35,6 +35,8 @@ jobs:
         run: uv run mypy services/local-core/enishi_core services/relay/relay services/enishi-mcp/enishi_mcp
       - name: Validate Relay deployment
         run: docker compose --env-file deploy/relay/.env.example -f deploy/relay/compose.yaml config --quiet
+      - name: Build locked Relay image
+        run: docker build -f deploy/relay/Dockerfile -t enishi-relay-ci .
 
   desktop:
     name: Desktop frontend
