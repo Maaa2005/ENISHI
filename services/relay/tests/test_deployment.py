@@ -35,3 +35,13 @@ def test_relay_container_runs_unprivileged_with_readiness_healthcheck() -> None:
     assert "HEALTHCHECK" in dockerfile
     assert "http://127.0.0.1:8080/ready" in dockerfile
     assert '"--no-server-header"' in dockerfile
+
+
+def test_prometheus_alerts_cover_core_failure_modes() -> None:
+    alerts = (DEPLOYMENT_DIR / "prometheus-alerts.yml").read_text()
+
+    assert "EnishiRelayDown" in alerts
+    assert "enishi_relay_readiness_failures_total" in alerts
+    assert "enishi_relay_pending_messages" in alerts
+    assert 'code="RELAY_UNAUTHORIZED"' in alerts
+    assert "resets(enishi_relay_uptime_seconds" in alerts

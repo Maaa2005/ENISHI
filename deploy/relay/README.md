@@ -45,4 +45,30 @@ the internal `relay-backend` network.
 
 At minimum, alert on repeated readiness failures, a continuously growing
 pending-message gauge, authentication rejection spikes, and restart loops.
-Back up the `relay-data` volume and test restoration before public operation.
+`prometheus-alerts.yml` contains starter rules for those conditions.
+
+## Backup and restore
+
+Create a consistent online backup with SQLite's backup API. The resulting file
+is integrity-checked and written with mode `0600`:
+
+```bash
+docker compose -f deploy/relay/compose.yaml exec relay \
+  python -m relay.database_tool backup \
+  --database /var/lib/enishi-relay/relay.db \
+  --output /var/lib/enishi-relay/relay-backup.db
+```
+
+Copy the verified backup off the host and into separate encrypted storage. To
+restore, stop the Relay, copy the selected backup into the volume, then run:
+
+```bash
+python -m relay.database_tool verify --database /path/to/relay-backup.db
+python -m relay.database_tool restore \
+  --backup /path/to/relay-backup.db \
+  --database /path/to/relay.db --force
+```
+
+Restore refuses to overwrite an existing database without `--force`, and also
+refuses while SQLite WAL/SHM sidecars exist. Re-run `/ready` and a two-node
+delivery smoke test before returning the restored Relay to service.
