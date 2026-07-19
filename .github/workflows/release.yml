@@ -1,0 +1,67 @@
+name: macOS Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20.19.0"
+          cache: npm
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.29"
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --locked --all-packages --all-groups
+      - run: npm ci
+      - name: Import Developer ID certificate
+        run: ./scripts/import_apple_certificate.sh
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+      - name: Build, sign, notarize, and verify
+        run: ./scripts/build_macos_release.sh
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+      - name: Generate updater manifest
+        run: |
+          VERSION="$(python3 -c 'import json; print(json.load(open("apps/desktop/src-tauri/tauri.conf.json"))["version"])')"
+          ARCHIVE="apps/desktop/src-tauri/target/release/bundle/macos/ENISHI.app.tar.gz"
+          python3 scripts/generate_updater_manifest.py \
+            --version "$VERSION" --tag "$GITHUB_REF_NAME" \
+            --repository "$GITHUB_REPOSITORY" \
+            --artifact "$ARCHIVE" --signature "$ARCHIVE.sig" \
+            --output latest.json
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          DMG="$(find apps/desktop/src-tauri/target/release/bundle/dmg -name '*.dmg' -type f -print -quit)"
+          ARCHIVE="apps/desktop/src-tauri/target/release/bundle/macos/ENISHI.app.tar.gz"
+          gh release create "$GITHUB_REF_NAME" "$DMG" "$ARCHIVE" "$ARCHIVE.sig" latest.json \
+            --verify-tag --generate-notes --title "ENISHI $GITHUB_REF_NAME"
+      - name: Delete temporary keychain
+        if: always()
+        run: |
+          if [ -n "${ENISHI_KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "$ENISHI_KEYCHAIN_PATH" || true
+          fi

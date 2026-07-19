@@ -105,6 +105,7 @@ Design notes in this repo:
 - [`docs/security.md`](docs/security.md) — security posture
 - [`docs/clone-memory.md`](docs/clone-memory.md) — clones and memory
 - [`docs/mcp-control-plane.md`](docs/mcp-control-plane.md) — Codex / Claude Code control plane
+- [`docs/release.md`](docs/release.md) — signed, notarized macOS release and updater operations
 
 ## Repository layout
 

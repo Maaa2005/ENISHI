@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { UpdateControl } from "../components/UpdateControl";
 import type { ApiClient } from "../services/api";
 import { useAppStore } from "../stores/appStore";
 
@@ -101,6 +102,7 @@ export function HomePage({ client }: { client: ApiClient | null }) {
         <section className="panel"><div className="panel-header"><div><h2>システム状態</h2><p>ローカル環境とAIプロバイダー</p></div></div><dl className="status-list">{rows.map(([label, value, ok]) => <div key={label}><dt><span className={`status-dot ${ok ? "online" : ""}`} />{label}</dt><dd>{loading && !health ? "…" : value}</dd></div>)}</dl></section>
       </div>
       <section className="savings-banner"><div><span className="savings-icon">⌁</span><div><strong>{Math.max(0, savedTokens).toLocaleString()} tokens</strong><p>構造化された交渉による推定削減量</p></div></div><span className="pill success">効率化</span></section>
+      <UpdateControl />
     </main>
   );
 }

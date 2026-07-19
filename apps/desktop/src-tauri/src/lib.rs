@@ -22,6 +22,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![commands::get_core_connection])
         .build(tauri::generate_context!())
