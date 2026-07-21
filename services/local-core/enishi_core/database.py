@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -29,6 +29,19 @@ def _sqlite_path(url: str) -> Path | None:
     if not url.startswith("sqlite:///"):
         return None
     return Path(url.removeprefix("sqlite:///"))
+
+
+def _enable_wal(engine: Engine, database_url: str) -> None:
+    """ファイルSQLiteのみWALへ切り替える（並行読み書きでのロック競合を減らす）。"""
+    if _is_memory_database(database_url):
+        return
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection: Any, _record: Any) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode = WAL")
+        cursor.execute("PRAGMA busy_timeout = 5000")
+        cursor.close()
 
 
 def _alembic_config(database_url: str) -> object:
@@ -67,6 +80,7 @@ def upgrade_schema(database_url: str) -> None:
 def _upgrade_schema_without_alembic_package(database_url: str) -> None:
     """オフライン検証環境用のフォールバック。配布環境ではAlembic依存を使う。"""
     engine = create_engine(database_url, connect_args={"check_same_thread": False})
+    _enable_wal(engine, database_url)
     try:
         Base.metadata.create_all(engine)
         with engine.begin() as connection:
@@ -98,6 +112,7 @@ def init_database(database_url: str | None = None) -> Engine:
     if not _is_memory_database(url):
         upgrade_schema(url)
     _engine = create_engine(url, connect_args={"check_same_thread": False})
+    _enable_wal(_engine, url)
     _session_factory = sessionmaker(bind=_engine, expire_on_commit=False)
     if _is_memory_database(url):
         Base.metadata.create_all(_engine)
