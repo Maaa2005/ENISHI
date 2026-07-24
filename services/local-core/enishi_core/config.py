@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     mock_task_timeout_seconds: int | None = Field(default=None, gt=0)
     task_worker_poll_interval_seconds: float = Field(default=0.5, gt=0)
     task_worker_id: str = "local-core-worker-1"
+    auto_discover_external_memory: bool = True
 
     data_dir: Path = Path.home() / "Library" / "Application Support" / "ENISHI"
     cache_dir: Path = Path.home() / "Library" / "Caches" / "ENISHI"

@@ -17,7 +17,8 @@ mcp = FastMCP(
     "ENISHI Second Brain",
     instructions=(
         "作業前に関連記憶を検索する。保存はユーザーが確定した判断・嗜好・知見だけにし、"
-        "推測や秘密情報は保存しない。外部メモリが未接続でもENISHI内蔵メモリを使える。"
+        "推測や秘密情報は保存しない。既存の外部脳があればそこを正本にし、"
+        "なければENISHI内蔵メモリを正本にする。"
     ),
 )
 
@@ -43,6 +44,11 @@ def _read(memory: Any) -> dict[str, Any]:
         "title": memory.title,
         "content": memory.content,
         "source": memory.source_type,
+        "storage_status": (
+            "pending_external_sync"
+            if memory.source_type == "enishi_pending"
+            else "stored"
+        ),
         "sensitivity": memory.sensitivity,
         "tags": memory.relevance_tags,
         "updated_at": memory.updated_at.isoformat(),
@@ -66,7 +72,7 @@ def remember(
     sensitivity: str = "private",
     tags: list[str] | None = None,
 ) -> dict[str, Any]:
-    """ユーザーが確定した長期的な知見・嗜好・判断をENISHIへ保存する。秘密は保存しない。"""
+    """確定した長期記憶を、外部脳優先の正本へ保存する。秘密は保存しない。"""
     if sensitivity == "secret":
         raise ValueError("MCP経由ではsecretを保存できません")
     with _session() as session:

@@ -38,6 +38,13 @@ class MemoryStatus(enum.StrEnum):
     DELETED = "deleted"
 
 
+class MemoryBackendStatus(enum.StrEnum):
+    INTERNAL_PRIMARY = "internal_primary"
+    EXTERNAL_PRIMARY = "external_primary"
+    EXTERNAL_UNAVAILABLE = "external_unavailable"
+    MIGRATING = "migrating"
+
+
 class MemoryItem(Base):
     __tablename__ = "memory_items"
 
@@ -72,5 +79,23 @@ class MemorySourceSetting(Base):
     connected: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     scope: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
+
+
+class MemoryBackendState(Base):
+    """ユーザーごとの記憶の正本を保持し、一時切断時のsplit-brainを防ぐ。"""
+
+    __tablename__ = "memory_backend_states"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    primary_source: Mapped[str] = mapped_column(String(64), default="memories")
+    primary_scope: Mapped[str] = mapped_column(String(500), default="")
+    status: Mapped[str] = mapped_column(
+        String(32), default=MemoryBackendStatus.INTERNAL_PRIMARY.value, index=True
+    )
+    detected_automatically: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_checked_at: Mapped[datetime] = mapped_column(default=utc_now)
+    last_synced_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)

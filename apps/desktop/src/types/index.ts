@@ -299,6 +299,25 @@ export interface MemorySourceSyncRead {
   updated: number;
   unchanged: number;
   skipped: number;
+  deleted: number;
+}
+
+export interface MemoryBackendRead {
+  primary_source: string;
+  primary_scope: string;
+  status: "internal_primary" | "external_primary" | "external_unavailable" | "migrating" | string;
+  detected_automatically: boolean;
+  pending_count: number;
+  internal_count: number;
+  last_checked_at: string;
+  last_synced_at: string | null;
+}
+
+export interface MemoryBackendMigrationRead {
+  migrated: number;
+  failed: number;
+  pending: number;
+  status: string;
 }
 
 export interface PolicyRead {

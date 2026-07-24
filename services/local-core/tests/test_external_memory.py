@@ -22,6 +22,14 @@ def test_markdown_folder_connects_and_syncs_idempotently(
     source = next(item for item in connected.json() if item["source"] == "obsidian")
     assert source["connected"] is True
     assert source["enabled"] is True
+    backend = client.get(
+        "/v1/memory-backend",
+        params={"user_id": user["id"]},
+        headers=auth_headers,
+    )
+    assert backend.status_code == 200
+    assert backend.json()["primary_source"] == "obsidian"
+    assert backend.json()["status"] == "external_primary"
 
     first = client.post(
         "/v1/memory-sources/obsidian/sync",
@@ -42,6 +50,18 @@ def test_markdown_folder_connects_and_syncs_idempotently(
     ).json()
     assert memories[0]["title"] == "採用方針"
     assert memories[0]["sensitivity"] == "private"
+
+    (vault / "decision.md").unlink()
+    removed = client.post(
+        "/v1/memory-sources/obsidian/sync",
+        json={"user_id": user["id"]},
+        headers=auth_headers,
+    )
+    assert removed.json()["deleted"] == 1
+    memories = client.get(
+        "/v1/memories", params={"user_id": user["id"]}, headers=auth_headers
+    ).json()
+    assert memories == []
 
 
 def test_missing_markdown_folder_is_not_connected(

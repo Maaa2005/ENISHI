@@ -16,7 +16,7 @@ from enishi_core.models import Base
 
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
-_BASELINE_REVISION = "202607180001"
+_BASELINE_REVISION = "202607240001"
 
 
 def _is_memory_database(url: str) -> bool:

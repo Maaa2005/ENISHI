@@ -135,6 +135,18 @@ export class ApiClient {
     return this.request<MemorySourceSettingRead[]>("/v1/memory-sources");
   }
 
+  getMemoryBackend(userId: string): Promise<import("../types").MemoryBackendRead> {
+    const query = new URLSearchParams({ user_id: userId }).toString();
+    return this.request(`/v1/memory-backend?${query}`);
+  }
+
+  migrateMemoryBackend(userId: string): Promise<import("../types").MemoryBackendMigrationRead> {
+    return this.request("/v1/memory-backend/migrate", {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId }),
+    });
+  }
+
   discoverMemorySources(): Promise<import("../types").MemorySourceDiscoveryRead[]> {
     return this.request("/v1/memory-sources/discover");
   }

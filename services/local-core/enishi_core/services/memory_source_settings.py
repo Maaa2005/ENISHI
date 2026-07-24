@@ -51,8 +51,6 @@ def list_settings(session: Session) -> list[MemorySourceSetting]:
             existing[source] = setting
     for setting in existing.values():
         setting.connected = _is_connected(setting.source, setting.scope)
-        if not setting.connected:
-            setting.enabled = False
     session.commit()
     return [existing[source] for source in KNOWN_SOURCES]
 

@@ -138,7 +138,7 @@ self-contained macOS sidecar, but no public signed release has been published.
 
 The real two-node pairing boundary is also executable as a self-check: `./scripts/run_pairing_e2e.sh` exchanges signed Agent Cards, proves that registration stops at `pending`, requires explicit fingerprint trust, sends a request through the Relay, waits for human approval, and confirms that both nodes persist the same canonical agreement.
 
-Codex and Claude Code can use ENISHI without opening the desktop app. The MCP control plane starts a loopback-only headless Local Core on demand, while the separate memory MCP reads and writes the second brain. Human approval, fingerprint trust, and disclosure changes remain in the desktop UI; opening it securely hands the same database from the headless Core to a UI-owned Core without publishing the UI token.
+Codex and Claude Code can use ENISHI without opening the desktop app. The MCP control plane starts a loopback-only headless Local Core on demand, while the separate memory MCP routes durable memories to an existing Obsidian/Markdown external brain when one is available and falls back to ENISHI's internal store when none exists. The external source remains canonical; ENISHI keeps a rebuildable search index and queues writes instead of creating a second source of truth during temporary disconnects. Human approval, fingerprint trust, and disclosure changes remain in the desktop UI; opening it securely hands the same database from the headless Core to a UI-owned Core without publishing the UI token.
 
 Design notes in this repo:
 

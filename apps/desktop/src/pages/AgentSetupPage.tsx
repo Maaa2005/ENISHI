@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ApiClient } from "../services/api";
 import type {
   DefaultDisclosurePolicyRead,
+  MemoryBackendRead,
   MemorySourceSettingRead,
   MemorySourceDiscoveryRead,
   MeetingPreferencesRead,
@@ -89,6 +90,7 @@ export function AgentSetupPage({
 }) {
   const [user, setUser] = useState<UserRead | null>(null);
   const [sources, setSources] = useState<MemorySourceSettingRead[]>([]);
+  const [memoryBackend, setMemoryBackend] = useState<MemoryBackendRead | null>(null);
   const [discoveredSources, setDiscoveredSources] = useState<MemorySourceDiscoveryRead[]>([]);
   const [disclosure, setDisclosure] = useState<DefaultDisclosurePolicyRead | null>(null);
   const [delegation, setDelegation] = useState<PolicyRead | null>(null);
@@ -116,12 +118,14 @@ export function AgentSetupPage({
       setDisclosure(loadedDisclosure);
       setProviders(loadedProviders);
       if (currentUser) {
-        const [loadedDelegation, loadedApprovalRules] = await Promise.all([
+        const [loadedDelegation, loadedApprovalRules, loadedMemoryBackend] = await Promise.all([
           client.getDelegationPolicy(currentUser.id),
           client.getApprovalRulesPolicy(currentUser.id),
+          client.getMemoryBackend(currentUser.id),
         ]);
         setDelegation(loadedDelegation);
         setApprovalRules(loadedApprovalRules);
+        setMemoryBackend(loadedMemoryBackend);
         try {
           setMeetingPreferences(await client.getMeetingPreferences(currentUser.id));
         } catch {
@@ -163,7 +167,20 @@ export function AgentSetupPage({
     setError(null);
     try {
       const result = await client.syncMemorySource(source.source, user.id);
-      setSyncMessage(`${source.source}: 新規${result.created}件・更新${result.updated}件`);
+      setSyncMessage(`${source.source}: 新規${result.created}件・更新${result.updated}件・削除反映${result.deleted}件`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const migrateMemoryBackend = async () => {
+    if (!client || !user) return;
+    setError(null);
+    try {
+      const result = await client.migrateMemoryBackend(user.id);
+      setSyncMessage(`正本へ${result.migrated}件移行・保留${result.pending}件・失敗${result.failed}件`);
+      setMemoryBackend(await client.getMemoryBackend(user.id));
+      await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -248,7 +265,24 @@ export function AgentSetupPage({
 
           <section style={sectionStyle}>
             <h3 style={{ marginTop: 0 }}>記憶ソース</h3>
-            <p>Obsidian VaultまたはMarkdownフォルダを指定できます。未接続でもENISHI内蔵メモリがセカンドブレインとして動作します。</p>
+            <p>外部脳が見つかればそれを正本にし、未接続の場合だけENISHI内蔵メモリを正本にします。</p>
+            {memoryBackend && (
+              <div style={{ border: "1px solid #ddd", borderRadius: 6, padding: "0.7rem", marginBottom: "0.7rem" }}>
+                <strong>現在の正本: {memoryBackend.primary_source === "memories" ? "ENISHI内蔵" : memoryBackend.primary_source}</strong>
+                <p style={{ margin: "0.35rem 0" }}>
+                  <Status>{memoryBackend.status}</Status>{" "}
+                  {memoryBackend.detected_automatically && <Status>自動検出</Status>}{" "}
+                  {memoryBackend.pending_count > 0 && <Status>同期待ち {memoryBackend.pending_count}件</Status>}
+                </p>
+                {memoryBackend.primary_scope && <small>{memoryBackend.primary_scope}</small>}
+                {memoryBackend.status === "migrating" && (
+                  <div><button onClick={() => void migrateMemoryBackend()}>既存記憶を正本へ移行</button></div>
+                )}
+                {memoryBackend.status === "external_unavailable" && (
+                  <p>外部脳は一時的に利用できません。新しい記憶は復旧までENISHI内で保留します。</p>
+                )}
+              </div>
+            )}
             {discoveredSources.map((source) => (
               <button key={source.path} onClick={() => void connectDiscoveredSource(source)}>
                 検出した {source.label} を接続

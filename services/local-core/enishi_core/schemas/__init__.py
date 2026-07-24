@@ -571,6 +571,29 @@ class MemorySourceSyncRead(BaseModel):
     updated: int
     unchanged: int
     skipped: int
+    deleted: int = 0
+
+
+class MemoryBackendRead(BaseModel):
+    primary_source: str
+    primary_scope: str
+    status: str
+    detected_automatically: bool
+    pending_count: int
+    internal_count: int
+    last_checked_at: datetime
+    last_synced_at: datetime | None
+
+
+class MemoryBackendMigrationRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=32)
+
+
+class MemoryBackendMigrationRead(BaseModel):
+    migrated: int
+    failed: int
+    pending: int
+    status: str
 
 
 class PolicyRead(BaseModel):

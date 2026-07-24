@@ -17,6 +17,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
     monkeypatch.setenv("ENISHI_LOG_DIR", str(tmp_path / "logs"))
     monkeypatch.setenv("ENISHI_TASK_WORKER_POLL_INTERVAL_SECONDS", "0.01")
     monkeypatch.setenv("ENISHI_MOCK_TASK_TIMEOUT_SECONDS", "2")
+    monkeypatch.setenv("ENISHI_AUTO_DISCOVER_EXTERNAL_MEMORY", "false")
 
     from enishi_core.config import get_settings
 

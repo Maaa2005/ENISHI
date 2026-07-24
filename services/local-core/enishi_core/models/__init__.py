@@ -7,6 +7,8 @@ from enishi_core.models.clone import CloneAgent, CloneStatus, MemorySnapshot
 from enishi_core.models.context_package import CloneContextPackage
 from enishi_core.models.identity import DeviceNode, PersonalAgent
 from enishi_core.models.memory import (
+    MemoryBackendState,
+    MemoryBackendStatus,
     MemoryItem,
     MemorySensitivity,
     MemorySourceSetting,
@@ -53,6 +55,8 @@ __all__ = [
     "DeviceNode",
     "LocalProject",
     "MemoryItem",
+    "MemoryBackendState",
+    "MemoryBackendStatus",
     "MemorySourceSetting",
     "MemorySnapshot",
     "MemorySensitivity",

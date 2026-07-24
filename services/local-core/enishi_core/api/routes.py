@@ -44,6 +44,9 @@ from enishi_core.schemas import (
     LocalAgentsRead,
     MeetingPreferencesPatch,
     MeetingPreferencesRead,
+    MemoryBackendMigrationRead,
+    MemoryBackendMigrationRequest,
+    MemoryBackendRead,
     MemoryCreate,
     MemoryRead,
     MemorySourceDiscoveryRead,
@@ -84,6 +87,7 @@ from enishi_core.services import audit as audit_service
 from enishi_core.services import (
     clone_bootstrap,
     context_builder,
+    memory_router,
     relay_worker,
     remote_negotiation,
 )
@@ -245,6 +249,25 @@ def list_memory_sources(
         MemorySourceSettingRead.model_validate(source)
         for source in memory_source_service.list_settings(session)
     ]
+
+
+@v1_router.get("/memory-backend", response_model=MemoryBackendRead)
+def get_memory_backend(
+    user_id: str, session: Session = Depends(get_session)
+) -> MemoryBackendRead:
+    return MemoryBackendRead.model_validate(
+        memory_router.summary(session, user_id=user_id)
+    )
+
+
+@v1_router.post("/memory-backend/migrate", response_model=MemoryBackendMigrationRead)
+def migrate_memory_backend(
+    body: MemoryBackendMigrationRequest,
+    session: Session = Depends(get_session),
+) -> MemoryBackendMigrationRead:
+    return MemoryBackendMigrationRead.model_validate(
+        memory_router.migrate_to_external(session, user_id=body.user_id)
+    )
 
 
 @v1_router.put("/memory-sources", response_model=list[MemorySourceSettingRead])

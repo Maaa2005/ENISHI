@@ -6,7 +6,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from enishi_core.models import MemoryItem, MemorySensitivity, MemoryStatus, User
-from enishi_core.services import memories
+from enishi_core.services import memory_router
 
 
 def ensure_local_user(session: Session, preferred_id: str | None = None) -> User:
@@ -22,6 +22,7 @@ def ensure_local_user(session: Session, preferred_id: str | None = None) -> User
 
 
 def search(session: Session, *, user_id: str, query: str, limit: int = 10) -> list[MemoryItem]:
+    memory_router.refresh_external_index(session, user_id=user_id)
     term = f"%{query.strip()}%"
     statement = (
         select(MemoryItem)
@@ -47,16 +48,12 @@ def remember(
     sensitivity: str = "private",
     tags: list[str] | None = None,
 ) -> MemoryItem:
-    return memories.create_memory(
+    return memory_router.remember(
         session,
         user_id=user_id,
-        source_type="enishi_mcp",
-        source_reference=None,
-        memory_type=memory_type,
         title=title[:200],
-        content={"text": text},
-        searchable_text=f"{title}\n{text}"[:2000],
-        confidence=1.0,
+        text=text,
+        memory_type=memory_type,
         sensitivity=sensitivity,
-        relevance_tags=tags or ["second-brain"],
+        tags=tags or ["second-brain"],
     )
