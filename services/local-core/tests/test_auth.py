@@ -25,6 +25,19 @@ def test_presentation_ui_origin_is_allowed(client: TestClient) -> None:
     assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
 
 
+def test_tauri_app_origin_is_allowed(client: TestClient) -> None:
+    response = client.options(
+        "/v1/approvals",
+        headers={
+            "Origin": "tauri://localhost",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "tauri://localhost"
+
+
 def test_untrusted_browser_origin_is_not_allowed(client: TestClient) -> None:
     response = client.options(
         "/v1/approvals",

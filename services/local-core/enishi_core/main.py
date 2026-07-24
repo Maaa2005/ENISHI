@@ -51,9 +51,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="ENISHI Local Core", version=__version__, lifespan=lifespan)
-    # 発表用Vite UIは別のloopback portからLocal Coreへ接続する。
-    # 任意originには開かず、ローカル開発UIのoriginだけを許可する。
-    allowed_origins = ["http://127.0.0.1:5173", "http://localhost:5173"]
+    # 配布版Tauri WebViewと発表用Vite UIはLocal Coreへcross-origin接続する。
+    # 任意originには開かず、アプリ固有originとローカル開発UIだけを許可する。
+    allowed_origins = [
+        "tauri://localhost",
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ]
     demo_origin = os.environ.get("ENISHI_ALLOWED_UI_ORIGIN")
     if demo_origin:
         allowed_origins.append(demo_origin)
