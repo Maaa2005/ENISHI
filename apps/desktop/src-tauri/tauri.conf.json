@@ -26,6 +26,10 @@
       "desktop": {
         "schemes": ["enishi"]
       }
+    },
+    "updater": {
+      "pubkey": "",
+      "endpoints": []
     }
   },
   "bundle": {
