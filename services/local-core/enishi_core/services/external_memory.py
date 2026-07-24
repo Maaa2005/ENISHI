@@ -25,6 +25,7 @@ _CATEGORY_BY_TYPE = {
     "preference": "Preferences",
     "negative_preference": "Preferences",
     "project": "Projects",
+    "project_state": "Projects",
 }
 
 

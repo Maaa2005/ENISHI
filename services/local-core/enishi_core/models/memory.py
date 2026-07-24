@@ -15,6 +15,7 @@ class MemoryType(enum.StrEnum):
     PREFERENCE = "preference"
     SKILL = "skill"
     PROJECT = "project"
+    PROJECT_STATE = "project_state"
     DECISION = "decision"
     POLICY = "policy"
     COMMUNICATION = "communication"

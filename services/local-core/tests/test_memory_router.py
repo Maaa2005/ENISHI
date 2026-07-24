@@ -122,6 +122,14 @@ def test_internal_memories_can_migrate_after_external_brain_appears(
             memory_type="decision",
         )
         assert original.source_type == "enishi_mcp"
+        legacy_project = second_brain.remember(
+            session,
+            user_id=user.id,
+            title="旧形式のプロジェクト状態",
+            text="project_stateも外部正本へ移行する",
+            memory_type="project_state",
+        )
+        assert legacy_project.source_type == "enishi_mcp"
 
         vault = tmp_path / "Vault"
         vault.mkdir()
@@ -131,6 +139,7 @@ def test_internal_memories_can_migrate_after_external_brain_appears(
         before = memory_router.summary(session, user_id=user.id)
         result = memory_router.migrate_to_external(session, user_id=user.id)
         session.refresh(original)
+        session.refresh(legacy_project)
         indexed = list(
             session.scalars(
                 select(MemoryItem).where(
@@ -143,12 +152,14 @@ def test_internal_memories_can_migrate_after_external_brain_appears(
 
         assert before["status"] == MemoryBackendStatus.MIGRATING.value
         assert result == {
-            "migrated": 1,
+            "migrated": 2,
             "failed": 0,
             "pending": 0,
             "status": MemoryBackendStatus.EXTERNAL_PRIMARY.value,
         }
         assert original.status == MemoryStatus.DELETED.value
+        assert legacy_project.status == MemoryStatus.DELETED.value
         assert len(indexed) == 1
+        assert list((vault / "Projects").glob("*旧形式のプロジェクト状態*.md"))
 
     get_settings.cache_clear()

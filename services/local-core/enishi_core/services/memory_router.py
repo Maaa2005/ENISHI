@@ -28,6 +28,7 @@ EXTERNAL_CANONICAL_TYPES = {
     "negative_preference",
     "skill",
     "project",
+    "project_state",
     "decision",
     "policy",
     "communication",

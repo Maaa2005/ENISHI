@@ -98,7 +98,7 @@ def build_clone_draft(
             preference_profile[memory.title] = memory.content
         elif memory.memory_type == "skill":
             skill_profile[memory.title] = memory.content
-        elif memory.memory_type == "project":
+        elif memory.memory_type in ("project", "project_state"):
             project_profile[memory.title] = memory.content
         elif memory.memory_type == "communication":
             communication_profile[memory.title] = memory.content

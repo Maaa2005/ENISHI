@@ -85,6 +85,7 @@ MemoryTypeLiteral = Literal[
     "preference",
     "skill",
     "project",
+    "project_state",
     "decision",
     "policy",
     "communication",
