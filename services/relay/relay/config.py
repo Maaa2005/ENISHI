@@ -4,6 +4,7 @@ import hashlib
 import secrets
 from functools import lru_cache
 
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,12 +17,30 @@ class RelaySettings(BaseSettings):
     node_token_hashes: str = ""
     # 本番では平文設定を拒否し、node_token_hashesを必須にする。
     require_hashed_tokens: bool = False
-    message_ttl_seconds: int = 3600
-    max_message_bytes: int = 65536
-    rate_limit_per_minute: int = 120
+    message_ttl_seconds: int = Field(default=3600, gt=0)
+    max_message_bytes: int = Field(default=65536, ge=1024, le=10 * 1024 * 1024)
+    max_json_depth: int = Field(default=16, ge=2, le=64)
+    max_json_items: int = Field(default=2048, ge=16, le=100_000)
+    max_string_length: int = Field(default=32768, ge=256, le=10 * 1024 * 1024)
+    rate_limit_per_minute: int = Field(default=120, gt=0)
+    fetch_default_limit: int = Field(default=50, ge=1, le=100)
+    fetch_max_limit: int = Field(default=100, ge=1, le=500)
+    max_pending_messages_per_receiver: int = Field(default=1000, gt=0)
+    max_pending_bytes_per_receiver: int = Field(default=64 * 1024 * 1024, gt=0)
+    max_total_pending_bytes: int = Field(default=512 * 1024 * 1024, gt=0)
     docs_enabled: bool = True
     # 空ならインメモリ。運用・デモではSQLiteファイルを明示する。
     database_path: str = ""
+
+    @model_validator(mode="after")
+    def validate_capacity_relationships(self) -> "RelaySettings":
+        if self.fetch_default_limit > self.fetch_max_limit:
+            raise ValueError("fetch_default_limit must not exceed fetch_max_limit")
+        if self.max_pending_bytes_per_receiver > self.max_total_pending_bytes:
+            raise ValueError(
+                "max_pending_bytes_per_receiver must not exceed max_total_pending_bytes"
+            )
+        return self
 
     @staticmethod
     def _credential_entries(raw: str, setting_name: str) -> list[tuple[str, str]]:

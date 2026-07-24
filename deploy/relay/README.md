@@ -39,7 +39,8 @@ newer packages.
 
 ## Monitoring
 
-`GET /metrics` returns Prometheus text with uptime, pending delivery count,
+`GET /metrics` returns Prometheus text with uptime, pending delivery count and
+bytes,
 accepted/fetched/acknowledged totals, readiness failures, and rejection totals.
 It has no node IDs, message IDs, bearer tokens, token hashes, or envelope data.
 Scrape `http://relay:8080/metrics` only from a monitoring container attached to
@@ -48,6 +49,18 @@ the internal `relay-backend` network.
 At minimum, alert on repeated readiness failures, a continuously growing
 pending-message gauge, authentication rejection spikes, and restart loops.
 `prometheus-alerts.yml` contains starter rules for those conditions.
+
+Mailbox reads are cursor-paged:
+
+```text
+GET /v1/messages?limit=50&cursor=<opaque cursor>
+```
+
+`limit` is capped at 100 by default. Production deployments should size
+`RELAY_MAX_PENDING_MESSAGES_PER_RECEIVER`,
+`RELAY_MAX_PENDING_BYTES_PER_RECEIVER`, and
+`RELAY_MAX_TOTAL_PENDING_BYTES` for their storage budget. Per-receiver capacity
+returns `429`; exhaustion of the Relay-wide byte budget returns `507`.
 
 ## Backup and restore
 

@@ -7,6 +7,10 @@ project_dir = Path(SPECPATH)
 datas = [
     (str(project_dir / "alembic.ini"), "."),
     (str(project_dir / "alembic_migrations"), "alembic_migrations"),
+    (
+        str(project_dir / "enishi_core" / "protocol" / "negotiation-message.schema.json"),
+        "enishi_core/protocol",
+    ),
 ]
 hiddenimports = []
 

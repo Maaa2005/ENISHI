@@ -24,7 +24,7 @@ def test_backup_and_restore_preserve_pending_delivery(tmp_path: Path) -> None:
 
     restore_database(backup, restored)
     restored_store = SqliteMailboxStore(restored)
-    messages = restored_store.fetch("agt_receiver")
+    messages = restored_store.fetch("agt_receiver").items
     assert [message.delivery_id for message in messages] == [delivery_id]
     assert messages[0].envelope["message_id"] == "backup-proof"
 

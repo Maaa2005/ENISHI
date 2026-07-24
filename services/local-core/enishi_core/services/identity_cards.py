@@ -20,7 +20,7 @@ from enishi_core.security.keys import ensure_node_keypair
 from enishi_core.services import agent_requests, peers
 
 _SUPPORTED_INTENTS = ["meeting.schedule", "task.request"]
-_PROTOCOL_VERSIONS = ["aun/0.1"]
+_PROTOCOL_VERSIONS = ["aun/0.2", "aun/0.1"]
 
 
 def _unsigned(card: dict[str, Any]) -> bytes:

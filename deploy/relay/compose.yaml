@@ -13,6 +13,9 @@ services:
       RELAY_MESSAGE_TTL_SECONDS: ${RELAY_MESSAGE_TTL_SECONDS:-3600}
       RELAY_MAX_MESSAGE_BYTES: ${RELAY_MAX_MESSAGE_BYTES:-65536}
       RELAY_RATE_LIMIT_PER_MINUTE: ${RELAY_RATE_LIMIT_PER_MINUTE:-120}
+      RELAY_MAX_PENDING_MESSAGES_PER_RECEIVER: ${RELAY_MAX_PENDING_MESSAGES_PER_RECEIVER:-1000}
+      RELAY_MAX_PENDING_BYTES_PER_RECEIVER: ${RELAY_MAX_PENDING_BYTES_PER_RECEIVER:-67108864}
+      RELAY_MAX_TOTAL_PENDING_BYTES: ${RELAY_MAX_TOTAL_PENDING_BYTES:-536870912}
     expose:
       - "8080"
     volumes:
@@ -28,7 +31,7 @@ services:
       - relay-backend
 
   caddy:
-    image: caddy:2.8-alpine
+    image: caddy:2.10.2-alpine
     restart: unless-stopped
     depends_on:
       relay:
@@ -36,6 +39,7 @@ services:
     environment:
       RELAY_DOMAIN: ${RELAY_DOMAIN:?set Relay domain}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME email}
+      RELAY_MAX_BODY_SIZE: ${RELAY_MAX_BODY_SIZE:-64KB}
     ports:
       - "80:80"
       - "443:443"

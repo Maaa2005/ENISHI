@@ -3,6 +3,10 @@
 }
 
 {$RELAY_DOMAIN} {
+	request_body {
+		max_size {$RELAY_MAX_BODY_SIZE:64KB}
+	}
+
 	@metrics path /metrics
 	respond @metrics 404
 

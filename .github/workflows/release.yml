@@ -6,16 +6,18 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
     runs-on: macos-latest
     environment: release
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "20.19.0"
           cache: npm
@@ -51,6 +53,14 @@ jobs:
             --repository "$GITHUB_REPOSITORY" \
             --artifact "$ARCHIVE" --signature "$ARCHIVE.sig" \
             --output latest.json
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: |
+            apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/release/bundle/macos/ENISHI.app.tar.gz
+            apps/desktop/src-tauri/target/release/bundle/macos/ENISHI.app.tar.gz.sig
+            latest.json
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

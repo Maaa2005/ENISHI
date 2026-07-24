@@ -17,7 +17,7 @@ jobs:
     name: Python and Relay deployment
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
@@ -27,6 +27,8 @@ jobs:
         run: uv python install 3.12
       - name: Sync workspace
         run: uv sync --locked --all-packages --all-groups
+      - name: Verify generated protocol resources
+        run: python scripts/sync_protocol_schema.py --check
       - name: Test
         run: uv run pytest -q
       - name: Ruff
@@ -42,8 +44,8 @@ jobs:
     name: Desktop frontend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "20"
           cache: npm
@@ -60,7 +62,7 @@ jobs:
       run:
         working-directory: apps/desktop/src-tauri
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Toolchain versions
         run: rustc --version && cargo --version
       - name: Check lockfile
@@ -69,3 +71,26 @@ jobs:
         run: cargo test --locked
       - name: Check
         run: cargo check --locked
+
+  pairing-e2e:
+    name: Signed two-node pairing E2E
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.29"
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --locked --all-packages --all-groups
+      - run: ./scripts/run_pairing_e2e.sh
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0

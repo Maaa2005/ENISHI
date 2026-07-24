@@ -309,7 +309,7 @@ class NegotiationRead(BaseModel):
 
 
 class NegotiationMessageRead(BaseModel):
-    protocol: str = "aun/0.1"
+    protocol: str = "aun/0.2"
     message_id: str
     session_id: str
     sender_agent_id: str

@@ -1,0 +1,37 @@
+{
+  "description": "RFC 8785 cross-language golden vectors for AUN Protocol 0.2",
+  "vectors": [
+    {
+      "name": "unicode-and-order",
+      "value": {
+        "z": "😀",
+        "a": "日本語"
+      },
+      "canonical_utf8": "{\"a\":\"日本語\",\"z\":\"😀\"}"
+    },
+    {
+      "name": "numbers",
+      "value": {
+        "integer": 42,
+        "fraction": 4.5,
+        "small": 0.000001,
+        "zero": 0
+      },
+      "canonical_utf8": "{\"fraction\":4.5,\"integer\":42,\"small\":0.000001,\"zero\":0}"
+    },
+    {
+      "name": "nested",
+      "value": {
+        "items": [
+          true,
+          null,
+          {
+            "b": 2,
+            "a": 1
+          }
+        ]
+      },
+      "canonical_utf8": "{\"items\":[true,null,{\"a\":1,\"b\":2}]}"
+    }
+  ]
+}

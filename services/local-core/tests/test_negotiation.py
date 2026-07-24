@@ -201,7 +201,7 @@ def test_messages_use_protocol_format(
     ).json()
     assert messages
     for message in messages:
-        assert message["protocol"] == "aun/0.1"
+        assert message["protocol"] == "aun/0.2"
         assert message["session_id"] == result["id"]
         assert message["intent"] == "meeting.schedule"
         assert message["requires_human_approval"] is False

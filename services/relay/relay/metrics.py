@@ -41,7 +41,7 @@ class RelayMetrics:
         with self._lock:
             self._readiness_failures += 1
 
-    def render(self, pending_messages: int) -> str:
+    def render(self, pending_messages: int, pending_bytes: int) -> str:
         with self._lock:
             deliveries = self._deliveries
             fetched = self._fetched
@@ -56,6 +56,9 @@ class RelayMetrics:
             "# HELP enishi_relay_pending_messages Current unacknowledged deliveries.",
             "# TYPE enishi_relay_pending_messages gauge",
             f"enishi_relay_pending_messages {pending_messages}",
+            "# HELP enishi_relay_pending_bytes Current unacknowledged delivery bytes.",
+            "# TYPE enishi_relay_pending_bytes gauge",
+            f"enishi_relay_pending_bytes {pending_bytes}",
             "# HELP enishi_relay_deliveries_total Accepted deliveries.",
             "# TYPE enishi_relay_deliveries_total counter",
             f"enishi_relay_deliveries_total {deliveries}",

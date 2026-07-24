@@ -49,9 +49,14 @@ class RelayClient:
 
     def fetch(self) -> list[dict[str, Any]]:
         try:
-            response = self._client.get("/v1/messages")
+            response = self._client.get("/v1/messages", params={"limit": 100})
             response.raise_for_status()
-            return list(response.json())
+            body = response.json()
+            # aun/0.2 Relayはページ応答。旧Relayの配列応答も移行期間中は読める。
+            if isinstance(body, dict):
+                items = body.get("items", [])
+                return list(items) if isinstance(items, list) else []
+            return list(body) if isinstance(body, list) else []
         except httpx.HTTPError as exc:
             raise _unavailable(exc) from exc
 

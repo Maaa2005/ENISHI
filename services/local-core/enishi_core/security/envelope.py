@@ -11,17 +11,22 @@ import json
 import secrets
 import uuid
 from datetime import UTC, datetime
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
+import rfc8785
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
 )
+from jsonschema import Draft202012Validator
 
 from enishi_core.errors import EnishiError
 
-PROTOCOL = "aun/0.1"
+PROTOCOL = "aun/0.2"
+LEGACY_PROTOCOL = "aun/0.1"
 MESSAGE_TYPES = {
     "REQUEST",
     "PROPOSE",
@@ -64,8 +69,48 @@ def _schema_error(message: str, envelope: dict[str, Any]) -> EnishiError:
     )
 
 
+@lru_cache
+def _v02_validator() -> Draft202012Validator:
+    packaged = (
+        Path(__file__).resolve().parents[1]
+        / "protocol"
+        / "negotiation-message.schema.json"
+    )
+    source = (
+        Path(__file__).resolve().parents[4]
+        / "packages"
+        / "protocol"
+        / "schemas"
+        / "negotiation-message.schema.json"
+    )
+    schema_path = packaged if packaged.exists() else source
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema)
+
+
+def _validate_created_at(envelope: dict[str, Any]) -> None:
+    try:
+        created_at = datetime.fromisoformat(str(envelope["created_at"]))
+    except (KeyError, ValueError) as exc:
+        raise _schema_error("created_at が不正です。", envelope) from exc
+    if created_at.tzinfo is None:
+        raise _schema_error("created_at にはタイムゾーンが必要です。", envelope)
+
+
 def validate_envelope(envelope: dict[str, Any]) -> None:
-    """Wire Schemaを外部依存なしでfail-closed検証する。"""
+    """0.2は公開JSON Schema、0.1は移行用legacy validatorで検証する。"""
+    protocol = envelope.get("protocol")
+    if protocol == PROTOCOL:
+        errors = list(_v02_validator().iter_errors(envelope))
+        if errors:
+            raise _schema_error("AUN Protocol 0.2 Schemaに適合しません。", envelope)
+        _validate_created_at(envelope)
+        return
+    if protocol != LEGACY_PROTOCOL:
+        raise _schema_error("未対応のプロトコルです。", envelope)
+
+    # 0.1受信互換。新規送信には使用せず、廃止時にこの分岐ごと削除する。
     keys = set(envelope)
     missing = _BASE_FIELDS - keys
     node_fields = keys & _NODE_FIELDS
@@ -91,8 +136,6 @@ def validate_envelope(envelope: dict[str, Any]) -> None:
     for field in node_fields:
         if not isinstance(envelope.get(field), str) or not envelope[field]:
             raise _schema_error(f"{field} が不正です。", envelope)
-    if envelope.get("protocol") != PROTOCOL:
-        raise _schema_error("未対応のプロトコルです。", envelope)
     if envelope.get("message_type") not in MESSAGE_TYPES:
         raise _schema_error("未対応のメッセージ種別です。", envelope)
     if (
@@ -113,23 +156,30 @@ def validate_envelope(envelope: dict[str, Any]) -> None:
         raise _schema_error("payloadまたはdeltaが不正です。", envelope)
     if not isinstance(envelope.get("requires_human_approval"), bool):
         raise _schema_error("requires_human_approval が不正です。", envelope)
-    try:
-        created_at = datetime.fromisoformat(envelope["created_at"])
-    except ValueError as exc:
-        raise _schema_error("created_at が不正です。", envelope) from exc
-    if created_at.tzinfo is None:
-        raise _schema_error("created_at にはタイムゾーンが必要です。", envelope)
+    _validate_created_at(envelope)
 
 
-def canonical_bytes(obj: Any) -> bytes:
-    """署名対象の正規化バイト列を生成する。"""
-    return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode(
-        "utf-8"
-    )
+def canonical_bytes(obj: Any, *, protocol: str = PROTOCOL) -> bytes:
+    """署名対象を正規化する。0.2はRFC 8785、0.1は旧Python形式。"""
+    if protocol == LEGACY_PROTOCOL:
+        return json.dumps(
+            obj,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    if protocol != PROTOCOL:
+        raise ValueError(f"unsupported protocol: {protocol}")
+    return rfc8785.dumps(obj)
 
 
-def _payload_hash(payload: dict[str, Any], delta: dict[str, Any]) -> str:
-    return hashlib.sha256(canonical_bytes({"payload": payload, "delta": delta})).hexdigest()
+def _payload_hash(
+    payload: dict[str, Any], delta: dict[str, Any], *, protocol: str
+) -> str:
+    return hashlib.sha256(
+        canonical_bytes({"payload": payload, "delta": delta}, protocol=protocol)
+    ).hexdigest()
 
 
 def _signable_fields(envelope: dict[str, Any]) -> dict[str, Any]:
@@ -152,8 +202,18 @@ def build_envelope(
     receiver_node_id: str | None = None,
 ) -> dict[str, Any]:
     """署名済みエンベロープを組み立てる。"""
+    # ノードIDを渡さない呼び出しは0.1互換。実Relay経路は必ず0.2を使う。
+    protocol = (
+        PROTOCOL
+        if sender_node_id is not None or receiver_node_id is not None
+        else LEGACY_PROTOCOL
+    )
+    if protocol == PROTOCOL and (
+        sender_node_id is None or receiver_node_id is None
+    ):
+        raise ValueError("sender_node_id and receiver_node_id must be specified together")
     envelope: dict[str, Any] = {
-        "protocol": PROTOCOL,
+        "protocol": protocol,
         "message_id": uuid.uuid4().hex,
         "session_id": session_id,
         "sender_agent_id": sender,
@@ -167,15 +227,14 @@ def build_envelope(
         "requires_human_approval": requires_human_approval,
         "nonce": secrets.token_hex(16),
         "created_at": datetime.now(UTC).isoformat(),
-        "payload_hash": _payload_hash(payload, delta),
+        "payload_hash": _payload_hash(payload, delta, protocol=protocol),
     }
-    # 新wireでは必須。引数未指定の呼び出しだけ旧wireとして維持する。
-    if sender_node_id is not None or receiver_node_id is not None:
-        if sender_node_id is None or receiver_node_id is None:
-            raise ValueError("sender_node_id and receiver_node_id must be specified together")
+    if protocol == PROTOCOL:
         envelope["sender_node_id"] = sender_node_id
         envelope["receiver_node_id"] = receiver_node_id
-    signature = private_key.sign(canonical_bytes(_signable_fields(envelope)))
+    signature = private_key.sign(
+        canonical_bytes(_signable_fields(envelope), protocol=protocol)
+    )
     envelope["signature"] = base64.b64encode(signature).decode("ascii")
     return envelope
 
@@ -189,11 +248,20 @@ def verify_envelope(
 ) -> None:
     """署名・payloadハッシュ・タイムスタンプを検証する。違反は例外を送出する。"""
     validate_envelope(envelope)
+    protocol = str(envelope["protocol"])
     try:
         public_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key_b64))
         signature = base64.b64decode(str(envelope.get("signature", "")))
-        public_key.verify(signature, canonical_bytes(_signable_fields(envelope)))
-    except (InvalidSignature, ValueError, TypeError) as exc:
+        public_key.verify(
+            signature,
+            canonical_bytes(_signable_fields(envelope), protocol=protocol),
+        )
+    except (
+        InvalidSignature,
+        ValueError,
+        TypeError,
+        rfc8785.CanonicalizationError,
+    ) as exc:
         raise EnishiError(
             code="MESSAGE_SIGNATURE_INVALID",
             message="メッセージ署名の検証に失敗しました。",
@@ -202,7 +270,9 @@ def verify_envelope(
         ) from exc
 
     expected_hash = _payload_hash(
-        dict(envelope.get("payload", {})), dict(envelope.get("delta", {}))
+        dict(envelope.get("payload", {})),
+        dict(envelope.get("delta", {})),
+        protocol=protocol,
     )
     if envelope.get("payload_hash") != expected_hash:
         raise EnishiError(

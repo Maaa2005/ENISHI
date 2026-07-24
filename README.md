@@ -1,29 +1,67 @@
 # ENISHI (縁) — Your AI Agent, Negotiating on Your Behalf
 
-*A platform where your personal AI agent represents you — talking to other people's agents to negotiate, coordinate, and settle the everyday back-and-forth so you don't have to. macOS desktop app.*
+**ENISHI is a macOS platform where personal AI agents negotiate with each other,
+share only the minimum necessary information, and stop for human approval before
+anything becomes final.**
 
-## The idea
+Today it can complete a signed two-node meeting negotiation through an untrusted
+Relay: Agent Card exchange, fingerprint trust, selective disclosure, proposal,
+human approval, and the same persisted agreement on both Macs.
 
-You have a personal AI agent — a "clone" that knows your preferences, your calendar, and your constraints. When you need to arrange something with another person, you don't do the back-and-forth yourself: your clone talks to their clone.
+## Try the real flow in three steps
 
-The two agents work out the details between them — a meeting time, the terms of a deal, who does what by when — and each comes back to its owner with a proposal. Nothing is final until the human approves it.
+Requires macOS 13+, Python 3.12+, [`uv`](https://docs.astral.sh/uv/), Node.js
+20+, and Rust.
 
-Booking a meeting across two calendars is the first thing ENISHI does today. But the goal is much bigger: any coordination between two people that currently takes a dozen messages — business arrangements, negotiations, plans, favors — carried out by agents that represent each side faithfully, keep private things private, and never act on their own.
+```bash
+git clone https://github.com/Maaa2005/ENISHI.git && cd ENISHI
+uv sync --locked --all-packages --all-groups && npm ci
+./scripts/run_demo_presentation.sh
+```
 
-Where this goes: once everyone has an agent that can speak for them, coordination stops being something you do by hand. You don't trade twenty messages to find a time, haggle over a delivery window, or chase three people for a sign-off — your agent and theirs settle it and hand each side the result to approve. The same rails work whether the other party is a friend, a client, or a company's agent. What ENISHI is really building is the protocol and the trust model that make that exchange safe: an agent that can prove who it speaks for, reveal only what it must, and never commit you to anything you didn't agree to. That's the connection — the 縁 — I want to make routine.
+For a headless proof of the full trust boundary, run:
 
-ENISHI is a macOS desktop app I'm building as a personal project. It's early, and this repo is the working codebase; the detailed internal design spec is kept private.
+```bash
+./scripts/run_pairing_e2e.sh
+```
 
-> **The names.** *Enishi* (縁) is the bond that forms between people. *Aun* (阿吽) comes from *a-un no kokyū* — the wordless, in-and-out breathing of two people who move in perfect sync. That is exactly what two delegated agents are meant to do: reach an understanding on their principals' behalf without either side having to spell everything out.
+See [`docs/demo.md`](docs/demo.md) for the six-screen walkthrough and the
+technical point demonstrated on each screen.
 
-## Why I'm building this
+## The problem and the change
 
-Coordination is expensive. Picking a meeting time across busy calendars, or settling small terms between two parties, eats real time and attention even though the decision itself is trivial. Handing that off to an AI assistant sounds obvious, but two problems make it hard to trust:
+| Before ENISHI | With ENISHI |
+| --- | --- |
+| People exchange many messages to find one slot | Agents exchange structured proposals |
+| Raw calendar context risks being overshared | Only candidate availability crosses the wire |
+| An assistant may act with unclear authority | Risky or externally visible actions stop at an expiring approval |
+| A central service becomes a trust bottleneck | Local Cores sign and verify; the Relay only stores and forwards |
 
-1. **Privacy.** To negotiate a time, your agent has to reason over your calendar — but the other side should never see your raw schedule, only whether a proposed slot works.
-2. **Control.** An agent that can act for you is also an agent that can commit you to things you didn't want. There has to be a hard gate where a human signs off before anything real happens.
+## What works now
 
-ENISHI is my attempt to build the plumbing for delegated agents that negotiate *without* leaking their principal's data and *without* acting without consent.
+- Signed Agent Cards, fingerprint confirmation, and per-peer trust
+- AUN Protocol 0.2 messages with Ed25519 signatures and RFC 8785 canonical JSON
+- Two-node meeting scheduling, human approvals, agreements, and audit logs
+- Local clone context with secret-memory exclusion and selective disclosure
+- Durable Relay mailbox with bounded requests, capacity limits, pagination, TTL,
+  ACK redelivery, rate limits, and aggregate metrics
+- Tauri desktop, loopback-only Local Core, and Codex / Claude Code MCP control plane
+
+## What is not released yet
+
+- There is currently no public signed DMG in GitHub Releases.
+- Apple signing, notarization, updater publication, and hosted Relay operations
+  are automated but still require the maintainer's release credentials and rollout.
+- Meeting scheduling is the production-shaped negotiation implemented today;
+  broader deal or task negotiation remains future work.
+- A screenshot and short demo recording still need to be published with the first release.
+
+The repository can build and verify an unsigned local `.app` and DMG now. See
+[`docs/release.md`](docs/release.md) for the signed release path.
+
+> **The names.** *Enishi* (縁) is the bond that forms between people. *Aun*
+> (阿吽) is the rhythm of two people moving in sync—the model for two delegated
+> agents reaching an understanding on their principals' behalf.
 
 ## How it works
 
@@ -90,9 +128,13 @@ The threat model assumes the relay is untrusted and the other agent may be adver
 
 More detail is in [`docs/security.md`](docs/security.md).
 
-## Status
+## Implementation status
 
-The presentation build is complete and demoable across two local nodes plus a relay. It includes the negotiation loop, node identity, selective disclosure, clone lifecycle, project-scoped AI tasks, the human-approval gate, agreements, and a privacy-safe audit trail. A fresh isolated presentation scenario starts with one command (see [`docs/demo.md`](docs/demo.md)). Production packaging now embeds Local Core as a self-contained macOS sidecar and includes the final ENISHI app icon, so the `.app` does not depend on a repository checkout, Python, or `uv` on the user's machine. The Relay now has a SQLite-backed mailbox, digest-only production authentication, separate liveness/readiness probes, aggregate Prometheus metrics, and a Caddy reference deployment for automatic TLS. Remaining distribution work is code signing, notarization, update delivery, hosted Relay rollout, alert integration, and backup/restore rehearsal.
+The presentation build is demoable across two local nodes plus a Relay. It
+includes the negotiation loop, node identity, selective disclosure, clone
+lifecycle, project-scoped AI tasks, the human-approval gate, agreements, and a
+privacy-safe audit trail. Production packaging embeds Local Core as a
+self-contained macOS sidecar, but no public signed release has been published.
 
 The real two-node pairing boundary is also executable as a self-check: `./scripts/run_pairing_e2e.sh` exchanges signed Agent Cards, proves that registration stops at `pending`, requires explicit fingerprint trust, sends a request through the Relay, waits for human approval, and confirms that both nodes persist the same canonical agreement.
 

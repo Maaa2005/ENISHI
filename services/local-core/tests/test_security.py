@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from enishi_core.errors import EnishiError
-from enishi_core.security.envelope import build_envelope, verify_envelope
+from enishi_core.security.envelope import build_envelope, canonical_bytes, verify_envelope
 from enishi_core.security.keys import ensure_node_keypair
 from fastapi.testclient import TestClient
 
@@ -76,6 +76,8 @@ def _signed_envelope(tmp_path: Path) -> tuple[dict[str, object], str]:
         delta={"candidate_slots": [{"start": "2026-07-13T14:00", "end": "2026-07-13T14:30"}]},
         requires_human_approval=False,
         private_key=private_key,
+        sender_node_id=identity.agent_id,
+        receiver_node_id="agt_peer",
     )
     return envelope, identity.public_key_b64
 
@@ -83,6 +85,26 @@ def _signed_envelope(tmp_path: Path) -> tuple[dict[str, object], str]:
 def test_envelope_sign_and_verify(tmp_path: Path) -> None:
     envelope, public_key = _signed_envelope(tmp_path)
     verify_envelope(envelope, public_key)  # 例外が出なければ成功
+
+
+def test_jcs_golden_vectors() -> None:
+    vectors_path = (
+        Path(__file__).parents[3]
+        / "packages"
+        / "protocol"
+        / "test-vectors"
+        / "jcs-v0.2.json"
+    )
+    vectors = json.loads(vectors_path.read_text(encoding="utf-8"))["vectors"]
+    for vector in vectors:
+        assert canonical_bytes(vector["value"]).decode("utf-8") == vector["canonical_utf8"]
+
+
+def test_jcs_rejects_non_finite_numbers() -> None:
+    import rfc8785
+
+    with pytest.raises(rfc8785.FloatDomainError):
+        canonical_bytes({"invalid": float("nan")})
 
 
 def test_generated_envelope_matches_wire_schema_fields(tmp_path: Path) -> None:
@@ -97,6 +119,26 @@ def test_generated_envelope_matches_wire_schema_fields(tmp_path: Path) -> None:
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     assert set(envelope) <= set(schema["properties"])
     assert set(schema["required"]) <= set(envelope)
+    import jsonschema
+
+    jsonschema.validate(envelope, schema)
+
+
+def test_packaged_protocol_schema_matches_public_source() -> None:
+    source = (
+        Path(__file__).parents[3]
+        / "packages"
+        / "protocol"
+        / "schemas"
+        / "negotiation-message.schema.json"
+    )
+    packaged = (
+        Path(__file__).parents[1]
+        / "enishi_core"
+        / "protocol"
+        / "negotiation-message.schema.json"
+    )
+    assert packaged.read_bytes() == source.read_bytes()
 
 
 def test_envelope_schema_rejects_wrong_sequence_type(tmp_path: Path) -> None:
@@ -113,6 +155,8 @@ def test_envelope_schema_rejects_wrong_sequence_type(tmp_path: Path) -> None:
         delta={"candidate_slots": []},
         requires_human_approval=False,
         private_key=private_key,
+        sender_node_id=identity.agent_id,
+        receiver_node_id="agt_peer",
     )
     with pytest.raises(EnishiError) as exc:
         verify_envelope(envelope, identity.public_key_b64)

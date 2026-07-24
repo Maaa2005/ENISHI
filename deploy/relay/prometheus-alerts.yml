@@ -25,6 +25,14 @@ groups:
         annotations:
           summary: ENISHI Relay pending mailbox is growing
 
+      - alert: EnishiRelayPendingBytesHigh
+        expr: enishi_relay_pending_bytes > 536870912 * 0.8
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: ENISHI Relay mailbox byte usage is above 80 percent of the default limit
+
       - alert: EnishiRelayAuthenticationSpike
         expr: increase(enishi_relay_rejections_total{code="RELAY_UNAUTHORIZED"}[5m]) > 50
         for: 5m

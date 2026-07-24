@@ -1,4 +1,5 @@
 import hashlib
+import json
 import logging
 from pathlib import Path
 
@@ -180,14 +181,14 @@ def test_put_fetch_ack_flow(
 
     fetched = client.get("/v1/messages", headers=headers_b)
     assert fetched.status_code == 200
-    items = fetched.json()
+    items = fetched.json()["items"]
     assert len(items) == 1
     assert items[0]["delivery_id"] == delivery_id
     assert items[0]["envelope"]["message_id"] == "m001"
 
     acked = client.post(f"/v1/messages/{delivery_id}/ack", headers=headers_b)
     assert acked.status_code == 200
-    assert client.get("/v1/messages", headers=headers_b).json() == []
+    assert client.get("/v1/messages", headers=headers_b).json()["items"] == []
 
 
 def test_personal_agent_message_is_routed_by_device_node(
@@ -198,7 +199,7 @@ def test_personal_agent_message_is_routed_by_device_node(
     envelope["receiver_node_id"] = AGENT_B
     posted = client.post("/v1/messages", json=envelope, headers=headers_a)
     assert posted.status_code == 201
-    fetched = client.get("/v1/messages", headers=headers_b).json()
+    fetched = client.get("/v1/messages", headers=headers_b).json()["items"]
     assert fetched[0]["envelope"]["sender_agent_id"] == "pa_alice"
     assert fetched[0]["envelope"]["receiver_agent_id"] == "pa_bob"
 
@@ -207,8 +208,8 @@ def test_redelivery_until_ack(
     client: TestClient, headers_a: dict[str, str], headers_b: dict[str, str]
 ) -> None:
     client.post("/v1/messages", json=_envelope(), headers=headers_a)
-    first = client.get("/v1/messages", headers=headers_b).json()
-    second = client.get("/v1/messages", headers=headers_b).json()
+    first = client.get("/v1/messages", headers=headers_b).json()["items"]
+    second = client.get("/v1/messages", headers=headers_b).json()["items"]
     assert len(first) == 1
     assert len(second) == 1
     assert first[0]["delivery_id"] == second[0]["delivery_id"]
@@ -236,6 +237,85 @@ def test_size_limit_413(client: TestClient, headers_a: dict[str, str]) -> None:
     assert response.json()["error"]["code"] == "MESSAGE_TOO_LARGE"
 
 
+def test_body_limit_rejects_before_json_parsing(
+    client: TestClient, headers_a: dict[str, str]
+) -> None:
+    response = client.post(
+        "/v1/messages",
+        content=b"{" + b"x" * 4096,
+        headers={**headers_a, "content-type": "application/json"},
+    )
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "MESSAGE_TOO_LARGE"
+
+
+def test_relay_model_rejects_unknown_top_level_fields(
+    client: TestClient, headers_a: dict[str, str]
+) -> None:
+    envelope = _envelope()
+    envelope["unexpected"] = "not allowed"
+    response = client.post("/v1/messages", json=envelope, headers=headers_a)
+    assert response.status_code == 422
+
+
+def test_duplicate_json_keys_are_rejected_before_model_parsing(
+    client: TestClient, headers_a: dict[str, str]
+) -> None:
+    raw = json.dumps(_envelope(), separators=(",", ":"))
+    duplicated = raw[:-1] + ',"message_id":"replacement"}'
+    response = client.post(
+        "/v1/messages",
+        content=duplicated,
+        headers={**headers_a, "content-type": "application/json"},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "MESSAGE_JSON_INVALID"
+
+
+def test_fetch_uses_bounded_cursor_pagination(
+    client: TestClient, headers_a: dict[str, str], headers_b: dict[str, str]
+) -> None:
+    for index in range(3):
+        envelope = _envelope()
+        envelope["message_id"] = f"m{index}"
+        assert client.post("/v1/messages", json=envelope, headers=headers_a).status_code == 201
+
+    first = client.get("/v1/messages?limit=2", headers=headers_b).json()
+    assert len(first["items"]) == 2
+    assert first["next_cursor"]
+    second = client.get(
+        "/v1/messages",
+        params={"limit": 2, "cursor": first["next_cursor"]},
+        headers=headers_b,
+    ).json()
+    assert len(second["items"]) == 1
+    assert second["next_cursor"] is None
+    assert {
+        item["delivery_id"] for item in first["items"]
+    }.isdisjoint({item["delivery_id"] for item in second["items"]})
+
+
+def test_receiver_capacity_limit_returns_429(
+    monkeypatch: pytest.MonkeyPatch,
+    headers_a: dict[str, str],
+) -> None:
+    from relay.config import get_relay_settings
+    from relay.main import create_app
+
+    monkeypatch.setenv("RELAY_NODE_TOKENS", f"{AGENT_A}=token-a,{AGENT_B}=token-b")
+    monkeypatch.setenv("RELAY_MAX_PENDING_MESSAGES_PER_RECEIVER", "1")
+    get_relay_settings.cache_clear()
+    with TestClient(create_app()) as capacity_client:
+        assert (
+            capacity_client.post("/v1/messages", json=_envelope(), headers=headers_a).status_code
+            == 201
+        )
+        over = capacity_client.post("/v1/messages", json=_envelope(), headers=headers_a)
+        assert over.status_code == 429
+        assert over.json()["error"]["code"] == "MAILBOX_CAPACITY_EXCEEDED"
+    get_relay_settings.cache_clear()
+
+
 def test_rate_limit_429(client: TestClient, headers_a: dict[str, str]) -> None:
     for _ in range(5):
         assert (
@@ -252,10 +332,10 @@ def test_ttl_expiry() -> None:
     fake_now = [1000.0]
     store = MailboxStore(ttl_seconds=60, rate_limit_per_minute=10, clock=lambda: fake_now[0])
     store.put(AGENT_B, {"message_id": "m1"})
-    assert len(store.fetch(AGENT_B)) == 1
+    assert len(store.fetch(AGENT_B).items) == 1
 
     fake_now[0] = 1061.0  # TTL経過
-    assert store.fetch(AGENT_B) == []
+    assert store.fetch(AGENT_B).items == []
 
 
 def test_sqlite_mailbox_survives_restart(tmp_path: Path) -> None:
@@ -266,13 +346,13 @@ def test_sqlite_mailbox_survives_restart(tmp_path: Path) -> None:
     delivery_id = first.put(AGENT_B, {"message_id": "persistent"})
 
     restarted = SqliteMailboxStore(database, ttl_seconds=60, rate_limit_per_minute=10)
-    fetched = restarted.fetch(AGENT_B)
+    fetched = restarted.fetch(AGENT_B).items
     assert [message.delivery_id for message in fetched] == [delivery_id]
     assert fetched[0].envelope == {"message_id": "persistent"}
 
     assert restarted.ack(AGENT_B, delivery_id) is True
     after_second_restart = SqliteMailboxStore(database)
-    assert after_second_restart.fetch(AGENT_B) == []
+    assert after_second_restart.fetch(AGENT_B).items == []
 
 
 def test_sqlite_ttl_and_rate_limit_survive_restart(tmp_path: Path) -> None:
@@ -297,7 +377,7 @@ def test_sqlite_ttl_and_rate_limit_survive_restart(tmp_path: Path) -> None:
     )
     assert restarted.allow_send(AGENT_A) is False
     fake_now[0] = 1060.0
-    assert restarted.fetch(AGENT_B) == []
+    assert restarted.fetch(AGENT_B).items == []
     assert restarted.allow_send(AGENT_A) is True
 
 
@@ -307,7 +387,7 @@ def test_sqlite_ack_is_scoped_to_receiver(tmp_path: Path) -> None:
     store = SqliteMailboxStore(tmp_path / "relay.db")
     delivery_id = store.put(AGENT_B, {"message_id": "m1"})
     assert store.ack(AGENT_A, delivery_id) is False
-    assert len(store.fetch(AGENT_B)) == 1
+    assert len(store.fetch(AGENT_B).items) == 1
 
 
 def test_logs_do_not_contain_message_body(

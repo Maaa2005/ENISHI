@@ -34,7 +34,7 @@ def _external_card(version: str = "enishi-card/1") -> dict[str, object]:
         card["capabilities"] = {
             "timezone": "America/Los_Angeles",
             "supported_intents": ["meeting.schedule"],
-            "protocol_versions": ["aun/0.1"],
+            "protocol_versions": ["aun/0.2", "aun/0.1"],
         }
     unsigned = json.dumps(
         card, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -107,7 +107,7 @@ def test_signed_card_registers_pending_and_tampering_is_rejected(
     assert card.json()["capabilities"] == {
         "timezone": "Asia/Tokyo",
         "supported_intents": ["meeting.schedule", "task.request"],
-        "protocol_versions": ["aun/0.1"],
+        "protocol_versions": ["aun/0.2", "aun/0.1"],
     }
 
     external_card = _external_card()

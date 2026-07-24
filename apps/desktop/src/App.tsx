@@ -1,22 +1,22 @@
-import { useEffect, useState } from "react";
-import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
-import { AgreementsPage } from "./pages/AgreementsPage";
-import { AgentSetupPage } from "./pages/AgentSetupPage";
-import { ApprovalsPage } from "./pages/ApprovalsPage";
-import { AuditPage } from "./pages/AuditPage";
-import { ClonesPage } from "./pages/ClonesPage";
-import { HomePage } from "./pages/HomePage";
-import { MemoriesPage } from "./pages/MemoriesPage";
-import { MetricsPage } from "./pages/MetricsPage";
-import { NegotiationsPage } from "./pages/NegotiationsPage";
-import { PeersPage } from "./pages/PeersPage";
-import { ProjectsPage } from "./pages/ProjectsPage";
-import { TasksPage } from "./pages/TasksPage";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { useDeepLinkInvite } from "./hooks/useDeepLinkInvite";
 import { ApiClient } from "./services/api";
 import { resolveCoreConnection, waitForCore } from "./services/backend";
-import { isAgentInvite } from "./services/invite";
 import { useAppStore } from "./stores/appStore";
 import "./styles.css";
+
+const AgreementsPage = lazy(() => import("./pages/AgreementsPage").then((module) => ({ default: module.AgreementsPage })));
+const AgentSetupPage = lazy(() => import("./pages/AgentSetupPage").then((module) => ({ default: module.AgentSetupPage })));
+const ApprovalsPage = lazy(() => import("./pages/ApprovalsPage").then((module) => ({ default: module.ApprovalsPage })));
+const AuditPage = lazy(() => import("./pages/AuditPage").then((module) => ({ default: module.AuditPage })));
+const ClonesPage = lazy(() => import("./pages/ClonesPage").then((module) => ({ default: module.ClonesPage })));
+const HomePage = lazy(() => import("./pages/HomePage").then((module) => ({ default: module.HomePage })));
+const MemoriesPage = lazy(() => import("./pages/MemoriesPage").then((module) => ({ default: module.MemoriesPage })));
+const MetricsPage = lazy(() => import("./pages/MetricsPage").then((module) => ({ default: module.MetricsPage })));
+const NegotiationsPage = lazy(() => import("./pages/NegotiationsPage").then((module) => ({ default: module.NegotiationsPage })));
+const PeersPage = lazy(() => import("./pages/PeersPage").then((module) => ({ default: module.PeersPage })));
+const ProjectsPage = lazy(() => import("./pages/ProjectsPage").then((module) => ({ default: module.ProjectsPage })));
+const TasksPage = lazy(() => import("./pages/TasksPage").then((module) => ({ default: module.TasksPage })));
 
 type Tab =
   | "home"
@@ -55,19 +55,11 @@ export function App() {
   const [tab, setTab] = useState<Tab>("home");
   const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null);
   const [pendingInvite, setPendingInvite] = useState<string | null>(null);
-
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    const acceptUrls = (urls: string[] | null) => {
-      const invite = urls?.find(isAgentInvite);
-      if (!invite) return;
-      setPendingInvite(invite);
-      setTab("peers");
-    };
-    void getCurrent().then(acceptUrls).catch(() => undefined);
-    void onOpenUrl(acceptUrls).then((stop) => { unlisten = stop; }).catch(() => undefined);
-    return () => unlisten?.();
+  const acceptInvite = useCallback((invite: string) => {
+    setPendingInvite(invite);
+    setTab("peers");
   }, []);
+  const deepLinkError = useDeepLinkInvite(acceptInvite);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,6 +105,8 @@ export function App() {
       </aside>
       <div className="content-pane">
       {connectionError && <section className="connection-error" role="alert"><div><strong>Local Coreへ接続できません</strong><p>{connectionError}</p></div><button onClick={() => setReconnectKey((value) => value + 1)}>再接続</button></section>}
+      {deepLinkError && <section className="connection-error" role="alert"><div><strong>招待リンクエラー</strong><p>{deepLinkError}</p></div></section>}
+      <Suspense fallback={<section className="loading-state" aria-live="polite">画面を読み込んでいます…</section>}>
       {tab === "home" && <HomePage client={client} />}
       {tab === "agentSetup" && (
         <AgentSetupPage client={client} onOpenPeers={() => setTab("peers")} />
@@ -133,6 +127,7 @@ export function App() {
       {tab === "projects" && <ProjectsPage client={client} />}
       {tab === "audit" && <AuditPage client={client} />}
       {tab === "tasks" && <TasksPage client={client} onOpenApprovals={() => setTab("approvals")} />}
+      </Suspense>
       </div>
     </div>
   );

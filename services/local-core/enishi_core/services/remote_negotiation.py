@@ -50,7 +50,7 @@ from enishi_core.services.scheduling import (
 
 INTENT = "meeting.schedule"
 _OFFER_SIZE = 5
-_PROTOCOL = "aun/0.1"
+_PROTOCOL = "aun/0.2"
 
 
 def _require_trusted_peer(session_db: Session, agent_id: str) -> PeerAgent:

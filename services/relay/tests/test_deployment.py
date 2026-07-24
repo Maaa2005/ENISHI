@@ -23,6 +23,8 @@ def test_caddy_terminates_tls_and_blocks_public_metrics() -> None:
     assert '"80:80"' in compose
     assert '"443:443"' in compose
     assert "respond @metrics 404" in caddyfile
+    assert "request_body" in caddyfile
+    assert "RELAY_MAX_BODY_SIZE" in caddyfile
     assert "reverse_proxy relay:8080" in caddyfile
     assert "health_uri /ready" in caddyfile
     assert "Strict-Transport-Security" in caddyfile
@@ -45,5 +47,6 @@ def test_prometheus_alerts_cover_core_failure_modes() -> None:
     assert "EnishiRelayDown" in alerts
     assert "enishi_relay_readiness_failures_total" in alerts
     assert "enishi_relay_pending_messages" in alerts
+    assert "enishi_relay_pending_bytes" in alerts
     assert 'code="RELAY_UNAUTHORIZED"' in alerts
     assert "resets(enishi_relay_uptime_seconds" in alerts
