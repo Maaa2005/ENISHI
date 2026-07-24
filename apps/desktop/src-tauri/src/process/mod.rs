@@ -28,7 +28,7 @@ fn core_info_path() -> Option<PathBuf> {
     Some(PathBuf::from(home).join("Library/Application Support/ENISHI/core.json"))
 }
 
-pub fn load_headless_core(path: &std::path::Path) -> Option<u32> {
+pub fn load_managed_core(path: &std::path::Path) -> Option<u32> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -38,7 +38,7 @@ pub fn load_headless_core(path: &std::path::Path) -> Option<u32> {
         }
     }
     let payload: CoreInfo = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
-    if payload.pid == 0 || payload.owner != "headless" {
+    if payload.pid == 0 || !matches!(payload.owner.as_str(), "headless" | "desktop") {
         return None;
     }
     let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), payload.port);
@@ -46,11 +46,11 @@ pub fn load_headless_core(path: &std::path::Path) -> Option<u32> {
     Some(payload.pid)
 }
 
-pub fn stop_headless_core() {
+pub fn stop_managed_core() {
     let Some(path) = core_info_path() else {
         return;
     };
-    let Some(pid) = load_headless_core(&path) else {
+    let Some(pid) = load_managed_core(&path) else {
         return;
     };
     let pid_argument = pid.to_string();
@@ -204,7 +204,7 @@ mod tests {
             generate_token()
         ));
         fs::write(&path, br#"{"port":8765,"pid":0,"owner":"headless"}"#).expect("write");
-        assert!(load_headless_core(&path).is_none());
+        assert!(load_managed_core(&path).is_none());
         let _ = fs::remove_file(path);
     }
 
@@ -226,7 +226,30 @@ mod tests {
         .expect("write");
         #[cfg(unix)]
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("chmod");
-        let pid = load_headless_core(&path).expect("pid");
+        let pid = load_managed_core(&path).expect("pid");
+        assert_eq!(pid, std::process::id());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn private_live_desktop_core_is_detected_for_handoff() {
+        #[cfg(unix)]
+        use std::os::unix::fs::PermissionsExt;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("listen");
+        let port = listener.local_addr().expect("address").port();
+        let path = std::env::temp_dir().join(format!(
+            "enishi-live-desktop-core-{}.json",
+            generate_token()
+        ));
+        fs::write(
+            &path,
+            format!(r#"{{"port":{port},"pid":{},"owner":"desktop"}}"#, std::process::id()),
+        )
+        .expect("write");
+        #[cfg(unix)]
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("chmod");
+        let pid = load_managed_core(&path).expect("pid");
         assert_eq!(pid, std::process::id());
         let _ = fs::remove_file(path);
     }
