@@ -293,6 +293,12 @@ export class ApiClient {
     });
   }
 
+  activateClone(cloneId: string): Promise<CloneRead> {
+    return this.request<CloneRead>(`/v1/clones/${cloneId}/activate`, {
+      method: "POST",
+    });
+  }
+
   listNegotiations(): Promise<NegotiationRead[]> {
     return this.request<NegotiationRead[]>("/v1/negotiations");
   }

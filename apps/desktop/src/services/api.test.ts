@@ -43,6 +43,17 @@ describe("ApiClient", () => {
     });
   });
 
+  it("activateCloneは有効化APIへPOSTする", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ id: "c1", status: "active" }));
+    const client = new ApiClient(connection, fetchFn);
+
+    await client.activateClone("c1");
+
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe("http://127.0.0.1:12345/v1/clones/c1/activate");
+    expect(init).toMatchObject({ method: "POST" });
+  });
+
   it("listMemoriesは対象ユーザーをqueryへ含める", async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse([]));
     const client = new ApiClient(connection, fetchFn);
