@@ -232,6 +232,19 @@ npm run test && npm run typecheck
 cd apps/desktop/src-tauri && cargo test
 ```
 
+## License
+
+This repository uses split licensing:
+
+- AUN Protocol schemas, examples, and interoperability vectors under
+  [`packages/protocol/`](packages/protocol/) are licensed under
+  [Apache-2.0](packages/protocol/LICENSE).
+- ENISHI Desktop, Local Core, Relay, and all other product code are
+  Copyright 2026 Nakamura Masashi. All rights reserved.
+
+See [LICENSING.md](LICENSING.md) for the exact scope. The protocol license does
+not grant trademark rights to the ENISHI or AUN Protocol names or branding.
+
 ---
 
 Built by [Nakamura Masashi](https://github.com/Maaa2005). See also [Stellise](https://github.com/Maaa2005/Stellise), an on-device AI alarm app on the App Store.
