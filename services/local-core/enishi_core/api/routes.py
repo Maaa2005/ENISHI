@@ -12,6 +12,7 @@ from enishi_core import __version__
 from enishi_core.api.deps import require_local_token
 from enishi_core.config import get_settings
 from enishi_core.database import get_session, is_connected
+from enishi_core.domains import get_domain, registered_intents
 from enishi_core.errors import EnishiError
 from enishi_core.models import (
     Approval,
@@ -40,6 +41,7 @@ from enishi_core.schemas import (
     HealthResponse,
     IdentityCardAdd,
     IdentityCardRead,
+    IntentRead,
     LocalAgentRead,
     LocalAgentsRead,
     MeetingPreferencesPatch,
@@ -603,54 +605,23 @@ def run_metrics_experiment(
     )
 
 
+@v1_router.get("/intents", response_model=list[IntentRead])
+def list_intents() -> list[IntentRead]:
+    """登録済み意思決定ドメインを公開する。相手ピアがどの intent に対応しているか知る足場。"""
+    return [
+        IntentRead(intent=intent, payload_schema=get_domain(intent).payload_schema)
+        for intent in registered_intents()
+    ]
+
+
 @v1_router.post("/negotiations", response_model=NegotiationRead, status_code=201)
 def create_negotiation(
     body: NegotiationCreate,
     session: Session = Depends(get_session),
 ) -> NegotiationRead:
-    if body.intent == negotiation_service.INTENT_TASK_REQUEST:
-        if body.title is None:
-            raise EnishiError(
-                code="INVALID_NEGOTIATION_PAYLOAD",
-                message="task.request には title が必要です。",
-                status_code=422,
-                details={"field": "title"},
-            )
-        negotiation = negotiation_service.run_task_request_negotiation(
-            session,
-            initiator_user_id=body.initiator_user_id,
-            responder_user_id=body.responder_user_id,
-            title=body.title,
-            description=body.description,
-            deadline=body.deadline,
-            estimated_hours=body.estimated_hours,
-            conditions=body.conditions,
-        )
-    else:
-        if (
-            body.topic is None
-            or body.duration_minutes is None
-            or body.date_range is None
-            or not body.preferred_time_ranges
-        ):
-            raise EnishiError(
-                code="INVALID_NEGOTIATION_PAYLOAD",
-                message=(
-                    "meeting.schedule には topic, duration_minutes, date_range, "
-                    "preferred_time_ranges が必要です。"
-                ),
-                status_code=422,
-                details={"intent": body.intent},
-            )
-        negotiation = negotiation_service.run_negotiation(
-            session,
-            initiator_user_id=body.initiator_user_id,
-            responder_user_id=body.responder_user_id,
-            topic=body.topic,
-            duration_minutes=body.duration_minutes,
-            date_range=body.date_range.model_dump(),
-            preferred_time_ranges=[r.model_dump() for r in body.preferred_time_ranges],
-        )
+    domain = get_domain(body.intent)
+    request = domain.validate_request(body)
+    negotiation = domain.start(session, request)
     return NegotiationRead.model_validate(negotiation)
 
 

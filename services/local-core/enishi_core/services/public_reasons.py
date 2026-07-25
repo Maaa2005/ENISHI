@@ -16,6 +16,9 @@ _MAPPING = {
     "relationship_requires_approval": "policy_declined",
     "human_rejected": "policy_declined",
     "approval_expired": "policy_declined",
+    "cost_split_negotiation_not_delegated": "policy_declined",
+    "cost_split_concession": "constraint_violation",
+    "cost_share_exceeds_limit": "constraint_violation",
 }
 
 

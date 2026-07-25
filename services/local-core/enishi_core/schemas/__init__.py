@@ -1,9 +1,11 @@
 """APIスキーマ（Pydantic）。"""
 
-from datetime import datetime, time
+from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from enishi_core.domains.value_objects import DateRange, TimeRange
 
 
 class HealthResponse(BaseModel):
@@ -230,27 +232,6 @@ class MetricsExperimentRead(BaseModel):
     created_at: datetime
 
 
-class DateRange(BaseModel):
-    start: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
-    end: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
-
-
-class TimeRange(BaseModel):
-    start: str = Field(pattern=r"^\d{2}:\d{2}$")
-    end: str = Field(pattern=r"^\d{2}:\d{2}$")
-
-    @model_validator(mode="after")
-    def validate_order(self) -> "TimeRange":
-        try:
-            start = time.fromisoformat(self.start)
-            end = time.fromisoformat(self.end)
-        except ValueError as exc:
-            raise ValueError("time range must contain valid times") from exc
-        if start >= end:
-            raise ValueError("time range start must be before end")
-        return self
-
-
 class MeetingPreferencesPatch(BaseModel):
     preferred_time_ranges: list[TimeRange] = Field(default_factory=list)
     avoid_time_ranges: list[TimeRange] = Field(default_factory=list)
@@ -262,18 +243,36 @@ class MeetingPreferencesRead(MeetingPreferencesPatch):
 
 
 class NegotiationCreate(BaseModel):
-    intent: Literal["meeting.schedule", "task.request"] = "meeting.schedule"
+    """交渉作成のワイヤ表現。スキーマ層にドメイン語彙を持たない（Phase B）。
+
+    ドメイン固有のフィールドはすべて不透明な `payload` に入れる。各ドメインの検証は
+    `enishi_core.domains.<domain>.<Domain>Payload` が担う（`domains/README.md` 参照）。
+
+    後方互換: `payload` が空のとき、`model_extra` に入った未知フィールド（旧来のフラットな
+    `topic` / `duration_minutes` / ... 形式）をそのまま `payload` へ畳み込む。
+    両方指定された場合は `payload` を優先する。
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    intent: str = Field(default="meeting.schedule")
     initiator_user_id: str
     responder_user_id: str
-    topic: str | None = Field(default=None, min_length=1, max_length=500)
-    duration_minutes: int | None = Field(default=None, ge=1, le=480)
-    date_range: DateRange | None = None
-    preferred_time_ranges: list[TimeRange] = Field(default_factory=list)
-    title: str | None = Field(default=None, min_length=1, max_length=500)
-    description: str = ""
-    deadline: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
-    estimated_hours: float | None = Field(default=None, ge=0.0)
-    conditions: dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("intent")
+    @classmethod
+    def validate_intent(cls, value: str) -> str:
+        from enishi_core.domains import get_domain
+
+        get_domain(value)
+        return value
+
+    @model_validator(mode="after")
+    def fold_legacy_flat_fields(self) -> "NegotiationCreate":
+        if not self.payload and self.model_extra:
+            self.payload = dict(self.model_extra)
+        return self
 
 
 class RemoteNegotiationCreate(BaseModel):
@@ -289,6 +288,13 @@ class AgentRequestCreate(BaseModel):
     user_id: str
     text: str = Field(min_length=1, max_length=2000)
     peer_agent_id: str | None = None
+
+
+class IntentRead(BaseModel):
+    """`GET /v1/intents` の1件分。レジストリを外から観測可能にする（Phase B）。"""
+
+    intent: str
+    payload_schema: dict[str, Any]
 
 
 class NegotiationRead(BaseModel):
