@@ -16,10 +16,31 @@ ENISHI は「人間の価値観と権限を持つAIエージェント同士が�
   多ラウンドの提案・逆提案で探す。二値判定（合う/合わない）。
 - **閾値との比較**（`domains/task_request.py`）: 単発のポリシー判定（自動承諾／自動カウンター／要承認）。
   二値判定（閾値以下か超えるか）。
-- **連続値の譲歩**（`domains/cost_split.py`）: 効用の理想点（`preferred_ratio` 由来の `target`）と
-  留保価格（`reservation_ratio` 由来の `reservation`）の間で、`concession_ratio` に従って
-  ラウンドごとに歩み寄る。二値判定ではなく連続値そのものが交渉の対象になる、Phase D
-  （効用ベース譲歩戦略）への足場でもある。
+- **連続値の譲歩**（`domains/cost_split.py`）: 効用の理想点（`preferred_ratio` 由来の `open_r`）と
+  留保価格（`reservation_ratio` 由来の `U`/`L`）の間で、`concession_ratio` に従ってラウンドごとに
+  双方が歩み寄る（Phase D）。二値判定ではなく連続値そのものが交渉の対象になる。
+
+## 戦略と進行の分離（Phase D）
+
+`cost.split` は、**戦略（次の一手を決める判断）**と**進行（メッセージ保存・承認生成・合意生成という
+副作用）**を、はっきり別のコード単位に分けている。
+
+- **戦略** = `domains/cost_split_strategy.py` の `next_action`。**副作用を一切持たない純粋関数**で、
+  受け取るのは自分の `CloneAgent` と、双方が見てよい公開情報（`OfferState` など）だけ。
+  相手の `CloneAgent` も `Session` も受け取らない（型シグネチャで担保する）。
+  `approval_required` のように `Session` が必要な判定は、**呼び出し側（ドライバ）が先に評価し、
+  その結果（bool）だけを引数として渡す**。DBアクセス・commit は一切行わない。
+- **進行（ドライバ）** = `domains/cost_split.py` の `run_cost_split_negotiation`。両者の
+  `next_action` を交互に呼び、返ってきた `StrategyAction`（accept/counter/escalate/reject）を
+  解釈して `append_message` / `create_agreement` / `create_negotiation_approval` / commit を行う。
+  ZOPA（合意可能領域）の事前判定のように「両者のクローンがローカルに揃っているドライバでしか
+  行えない最適化」はドライバ側に置き、`next_action` には持ち込まない。
+
+**この境界がある理由**: 戦略が自分のクローンと公開情報だけで完結していれば、ローカル交渉（両者の
+`next_action` を呼ぶ）とリモート交渉（自分の分だけ呼んで結果を送信する）で、**ドライバが違うだけで
+判断は同一のコードにできる**（`services/remote_negotiation.py` はローカルに相手のクローンを
+持たない）。新しいドメインが多ラウンドの交渉を実装するとき、特に双方が譲歩しうる構造なら、
+`next_action` パターン（純粋な戦略関数 + 副作用を持つドライバ）に倣うこと。
 
 ## 手順
 

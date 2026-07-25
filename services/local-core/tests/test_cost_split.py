@@ -317,3 +317,277 @@ def test_escalated_approval_approved_creates_agreement_with_agreed_share(
     assert len(matching) == 1
     assert matching[0]["agreed_payload"]["agreed_share"] == 6000.0
     assert matching[0]["agreed_payload"]["intent"] == "cost.split"
+
+
+# ---------------------------------------------------------------------------
+# Phase D: 双方向の効用ベース譲歩（次の一手を決める戦略が純粋関数 next_action に切り出され、
+# initiator/responder 双方が交互に COUNTER を出せるようになったことを検証する。
+# ---------------------------------------------------------------------------
+
+
+def _setup_pair_with_clone_ids(
+    client: TestClient, auth_headers: dict[str, str]
+) -> tuple[str, str, str, str]:
+    """initiator_user_id, initiator_clone_id, responder_user_id, responder_clone_id を返す。
+
+    双方向譲歩のテストは initiator 側のポリシーも制御する必要があるため、
+    `pair` フィクスチャ（responder のクローンIDしか返さない）を使わずここで独自に組み立てる。
+    """
+    initiator, responder, responder_clone_id = _setup_pair(client, auth_headers)
+    initiator_clones_response = client.get(f"/v1/clones/{initiator}", headers=auth_headers)
+    assert initiator_clones_response.status_code == 200
+    initiator_clones = initiator_clones_response.json()
+    assert len(initiator_clones) == 1
+    initiator_clone_id = str(initiator_clones[0]["id"])
+    return initiator, initiator_clone_id, responder, responder_clone_id
+
+
+def _slow_convergence_negotiation(
+    client: TestClient, auth_headers: dict[str, str]
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """3ラウンドでは交差しない、双方が譲歩し合う交渉トレースを1本作る。
+
+    responder: reservation_ratio=0.7 (U=7000), preferred_ratio=0.1 (open_r=1000), concession=0.3
+    initiator: reservation_ratio=0.5 (L_policy=5000 -> L=min(5000, 6000)=5000), concession=0.3
+    -> round1(responder) counter 2500, round2(initiator) counter 5000,
+       round3(responder) は交差せず本来なら counter(3250) だが D3 によりエスカレーションする。
+    """
+    initiator, initiator_clone_id, responder, responder_clone_id = _setup_pair_with_clone_ids(
+        client, auth_headers
+    )
+    _set_cost_split_profile(
+        responder_clone_id,
+        policy={
+            "max_auto_accept_amount": 100.0,
+            "max_negotiable_amount": 50000.0,
+            "reservation_ratio": 0.7,
+            "concession_ratio": 0.3,
+        },
+        preference={"preferred_ratio": 0.1},
+    )
+    _set_cost_split_profile(
+        initiator_clone_id,
+        policy={
+            "max_auto_accept_amount": 100.0,
+            "max_negotiable_amount": 50000.0,
+            "reservation_ratio": 0.5,
+            "concession_ratio": 0.3,
+        },
+    )
+    negotiation = _cost_split(
+        client,
+        auth_headers,
+        initiator,
+        responder,
+        total_amount=10000.0,
+        proposed_share=6000.0,
+    )
+    messages = client.get(
+        f"/v1/negotiations/{negotiation['id']}/messages", headers=auth_headers
+    ).json()
+    return negotiation, messages
+
+
+def test_bilateral_concession_both_sides_counter(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """1. 双方向譲歩: initiator と responder の両方が COUNTER を出す。"""
+    _negotiation, messages = _slow_convergence_negotiation(client, auth_headers)
+    counters = [m for m in messages if m["message_type"] == "COUNTER"]
+    assert len(counters) >= 2
+    senders = [m["sender_agent_id"] for m in counters]
+    # 連続する COUNTER の送信者が交互になっている（片側だけが動き続けていない）。
+    assert all(senders[i] != senders[i + 1] for i in range(len(senders) - 1))
+
+
+def test_monotonicity_responder_nondecreasing_initiator_nonincreasing(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """2. 単調性: responder の提示額は非減少、initiator の要求額は非増加。"""
+    _negotiation, messages = _slow_convergence_negotiation(client, auth_headers)
+    counters = [m for m in messages if m["message_type"] == "COUNTER"]
+    responder_amounts = []
+    initiator_amounts = []
+    # sender が responder（REQUEST の受信者）かどうかは messages[0] の受信者と比較して判定する。
+    request_receiver = messages[0]["receiver_agent_id"]
+    for message in counters:
+        amount = message["delta"]["proposed_share"]
+        if message["sender_agent_id"] == request_receiver:
+            responder_amounts.append(amount)
+        else:
+            initiator_amounts.append(amount)
+    assert responder_amounts == sorted(responder_amounts)
+    assert initiator_amounts == sorted(initiator_amounts, reverse=True)
+    assert len(responder_amounts) >= 1
+    assert len(initiator_amounts) >= 1
+
+
+def test_reservation_price_never_violated(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """3. 留保価格の不可侵: responder の提示は U を超えず、initiator の要求は L を下回らない。"""
+    negotiation, messages = _slow_convergence_negotiation(client, auth_headers)
+    # このシナリオの U=7000, L=5000（_slow_convergence_negotiation のdocstring参照）。
+    reservation_u = 10000.0 * 0.7
+    floor_l = 5000.0
+    request_receiver = messages[0]["receiver_agent_id"]
+    for message in messages:
+        if message["message_type"] != "COUNTER":
+            continue
+        amount = message["delta"]["proposed_share"]
+        if message["sender_agent_id"] == request_receiver:
+            assert amount <= reservation_u
+        else:
+            assert amount >= floor_l
+    assert negotiation["status"] == "waiting_approval"
+
+
+def test_zopa_exists_converges_to_agreement_when_concession_ratio_is_one(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """4. ZOPA あり → 合意: concession_ratio を両者1.0にすれば1往復で交差してAGREEDになる。"""
+    initiator, initiator_clone_id, responder, responder_clone_id = _setup_pair_with_clone_ids(
+        client, auth_headers
+    )
+    _set_cost_split_profile(
+        responder_clone_id,
+        policy={
+            "max_auto_accept_amount": 100.0,
+            "max_negotiable_amount": 50000.0,
+            "reservation_ratio": 0.5,
+            "concession_ratio": 1.0,
+        },
+        preference={"preferred_ratio": 0.1},
+    )
+    _set_cost_split_profile(
+        initiator_clone_id,
+        policy={
+            "max_auto_accept_amount": 100.0,
+            "max_negotiable_amount": 50000.0,
+            "reservation_ratio": 0.5,
+            "concession_ratio": 1.0,
+        },
+    )
+    negotiation = _cost_split(
+        client,
+        auth_headers,
+        initiator,
+        responder,
+        total_amount=10000.0,
+        proposed_share=3000.0,
+    )
+    assert negotiation["status"] == "agreed"
+    assert negotiation["result"]["agreed_share"] == 3000.0
+    assert negotiation["result"]["rounds"] == 2
+
+    messages = client.get(
+        f"/v1/negotiations/{negotiation['id']}/messages", headers=auth_headers
+    ).json()
+    assert [m["message_type"] for m in messages] == ["REQUEST", "COUNTER", "ACCEPT"]
+    # 交差前に COUNTER (responder) → 交差後に ACCEPT (initiator) と、往復してから合意している。
+    assert messages[1]["sender_agent_id"] != messages[2]["sender_agent_id"]
+
+
+def test_no_zopa_never_agrees(client: TestClient, auth_headers: dict[str, str]) -> None:
+    """5. ZOPA なし → 合意しない: L > U になるポリシーで AGREED にならない。"""
+    initiator, initiator_clone_id, responder, responder_clone_id = _setup_pair_with_clone_ids(
+        client, auth_headers
+    )
+    _set_cost_split_profile(
+        responder_clone_id,
+        policy={
+            "max_auto_accept_amount": 100.0,
+            "max_negotiable_amount": 50000.0,
+            "reservation_ratio": 0.3,  # U = 3000
+            "concession_ratio": 0.5,
+        },
+    )
+    _set_cost_split_profile(
+        initiator_clone_id,
+        policy={
+            "max_auto_accept_amount": 100.0,
+            "max_negotiable_amount": 50000.0,
+            "reservation_ratio": 0.5,  # L_policy = 5000
+            "concession_ratio": 0.5,
+        },
+    )
+    negotiation = _cost_split(
+        client,
+        auth_headers,
+        initiator,
+        responder,
+        total_amount=10000.0,
+        proposed_share=8000.0,  # L = min(5000, 8000) = 5000 > U = 3000
+    )
+    assert negotiation["status"] != "agreed"
+    assert negotiation["status"] in {"waiting_approval", "failed"}
+
+
+def test_round_limit_escalates_to_approval_instead_of_auto_accept(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """6. ラウンド上限: ZOPAはあるが concession_ratio が小さく3ラウンドで交差しない設定
+    → waiting_approval になり pending_approval_id が立つ（D3の意図的な仕様変更）。
+    """
+    negotiation, _messages = _slow_convergence_negotiation(client, auth_headers)
+    assert negotiation["status"] == "waiting_approval"
+    assert negotiation["pending_approval_id"] is not None
+
+
+def test_minimal_information_principle_bilateral_no_leaks(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """7. 最小情報（拡張）: 双方向譲歩でも policy パラメータがメッセージに漏れない。"""
+    _negotiation, messages = _slow_convergence_negotiation(client, auth_headers)
+    assert len(messages) >= 3
+    for message in messages:
+        _assert_no_forbidden_keys(message["payload"])
+        _assert_no_forbidden_keys(message["delta"])
+
+
+def test_next_action_is_a_pure_function_callable_without_session() -> None:
+    """8. 戦略の純粋性: next_action は Session を渡さずに直接呼べる。"""
+    from enishi_core.domains.cost_split_strategy import OfferState, next_action
+    from enishi_core.models import CloneAgent
+
+    responder_clone = CloneAgent(
+        policy_profile={
+            "cost_split": {
+                "max_auto_accept_amount": 100.0,
+                "max_negotiable_amount": 50000.0,
+                "reservation_ratio": 0.7,
+                "concession_ratio": 0.3,
+            }
+        },
+        preference_profile={"cost_split": {"preferred_ratio": 0.1}},
+    )
+
+    action = next_action(
+        clone=responder_clone,
+        role="responder",
+        total_amount=10000.0,
+        proposed_share=6000.0,
+        state=OfferState(round_number=1, standing_offer=6000.0, my_last_offer=None),
+    )
+
+    assert action.kind == "counter"
+    assert action.amount == 2500.0
+    assert action.reason_codes == []
+
+    initiator_clone = CloneAgent(
+        policy_profile={
+            "cost_split": {
+                "reservation_ratio": 0.5,
+                "concession_ratio": 0.3,
+            }
+        },
+    )
+    accept_action = next_action(
+        clone=initiator_clone,
+        role="initiator",
+        total_amount=10000.0,
+        proposed_share=3000.0,
+        state=OfferState(round_number=2, standing_offer=3000.0, my_last_offer=3000.0),
+    )
+    assert accept_action.kind == "accept"
+    assert accept_action.amount == 3000.0

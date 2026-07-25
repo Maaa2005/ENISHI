@@ -73,14 +73,31 @@ def create_agreement(
 
 def create_negotiation_approval(
     session_db: Session,
-    responder: CloneAgent,
+    decider: CloneAgent,
     negotiation: NegotiationSession,
     payload: dict[str, Any],
     reason: str,
+    *,
+    sequence: int = 2,
 ) -> Approval:
+    """手番のエージェント（`decider`）が自分の所有者へ最終判断をエスカレーションする。
+
+    `meeting.schedule` / `task.request` は常に responder が decider（挙動は変わらない）。
+    `cost.split`（Phase D）以降は、交互提示で手番になった側（responder/initiator どちらも
+    ありうる）が decider になる。
+
+    `sequence` はデフォルトで2（REQUESTの直後）。`cost.split` のように複数ラウンドの
+    COUNTER の後でエスカレーションしうるドメインは、呼び出し側で正しい採番
+    （`len(messages) + 1`）を渡すこと。
+    """
+    other_clone_id = (
+        negotiation.initiator_clone_id
+        if decider.id == negotiation.responder_clone_id
+        else negotiation.responder_clone_id
+    )
     approval = approval_service.create_approval(
         session_db,
-        user_id=responder.user_id,
+        user_id=decider.user_id,
         action_type="negotiation_decision",
         description=f"交渉 {negotiation.id} の最終判断が必要です。",
         level=1,
@@ -97,9 +114,9 @@ def create_negotiation_approval(
     session_db.add(
         NegotiationMessage(
             session_id=negotiation.id,
-            sequence=2,
-            sender_agent_id=responder.id,
-            receiver_agent_id=negotiation.initiator_clone_id,
+            sequence=sequence,
+            sender_agent_id=decider.id,
+            receiver_agent_id=other_clone_id,
             message_type=MessageType.REQUEST_APPROVAL.value,
             intent=negotiation.intent,
             payload={},
