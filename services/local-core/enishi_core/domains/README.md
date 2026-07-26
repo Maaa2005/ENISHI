@@ -104,6 +104,13 @@ import しているため残す）で、実体は持たない。全ドメイン�
    register(ExpenseApprovalDomain())
    ```
 
+   これだけで、自然言語の依頼文をLLMが解釈する入口（`services/intent_interpreter.py`,
+   Phase C）の intent 分類候補も自動で増える。`ClaudeInterpreter` は候補一覧を
+   `registered_intents()` から動的に生成しており、intentをハードコードしていないため、
+   新ドメインの登録がここでも「1ファイル+1行」で完結する。payload抽出も
+   ここで定義した `payload_model` をそのまま `output_format` として再利用する
+   （新しい抽出用スキーマを書き起こす必要はない）。
+
 4. **テストを足す**: `tests/test_decision_domains.py` に倣い、
    レジストリへの登録・`validate_request` のエラー・`start` の結果を検証する。
    `tests/test_cost_split.py` は「最小情報の原則」（responder の予算・留保価格・効用パラメータを

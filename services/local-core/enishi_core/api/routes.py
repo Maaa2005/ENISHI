@@ -648,8 +648,8 @@ def create_agent_request(
     body: AgentRequestCreate,
     session: Session = Depends(get_session),
 ) -> NegotiationRead:
-    # Relay設定の解決より先に検証し、曖昧入力を必ず422かつ無送信で返す。
-    agent_request_service.interpret_meeting_request(body.text)
+    # 曖昧入力・未知intentの検証は submit_agent_request 内の解釈ステップが最初に行い、
+    # Relayへ触れる前に422を返す（intent_interpreter.py, C4）。
     negotiation = agent_request_service.submit_agent_request(
         session,
         get_relay_client(),
