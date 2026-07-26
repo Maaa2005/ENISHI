@@ -66,18 +66,19 @@ def _trusted_peer(
     assert client.post(f"/v1/peers/{agent_id}/trust", headers=headers).status_code == 200
 
 
-def test_cost_split_remote_request_returns_422_enishi_not_implemented(
+def test_cost_split_remote_request_to_v1_peer_returns_409_capability_mismatch(
     client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """新規テスト5: `cost.split` を自然言語経由で遠隔依頼すると、
-    ENISHI側が遠隔ドライバを未実装であることを理由に422 `INTENT_NOT_SUPPORTED_FOR_REMOTE_REQUEST`
-    が返る（相手の能力とは無関係に、ENISHI自身が対応していないという正しい理由）。
+    """新規テスト5（F5完了後の書き直し）: `cost.split` を自然言語経由で遠隔依頼すると、
+    `CostSplitDomain.supports_remote` が `True` になった今、422
+    `INTENT_NOT_SUPPORTED_FOR_REMOTE_REQUEST` はもう返らない。代わりに、能力宣言のない
+    v1ピア（本テストの `_trusted_peer` は capabilities なしで登録する）は meeting.schedule
+    以外の遠隔交渉を許可しないため、既存の409 `PEER_CAPABILITY_MISMATCH` に到達する
+    （「相手が cost.split に対応していない」という正しい理由）。
 
-    NOTE(F5後の変更予定): `cost.split` の遠隔ドライバ（F5, 本フェーズのスコープ外）が実装され
-    `CostSplitDomain.supports_remote` が `True` になったら、この422は消える。F5完了後は
-    「相手が cost.split に対応していない」ケースだけが残り、そのときは既存の409
-    `PEER_CAPABILITY_MISMATCH` に到達するはずである（本テストは 422 → 409 の変化として
-    書き直すか、409ケース用の別テストへ置き換える）。
+    NOTE(F5前の履歴): このテストはF5完了前は
+    `test_cost_split_remote_request_returns_422_enishi_not_implemented` という名前で、
+    ENISHI自身が未実装であることを理由に422を返すことを検証していた。
     """
     relay = _FakeRelay()
     monkeypatch.setattr("enishi_core.api.routes.get_relay_client", lambda: relay)
@@ -105,9 +106,9 @@ def test_cost_split_remote_request_returns_422_enishi_not_implemented(
         headers=auth_headers,
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 409
     body = response.json()
-    assert body["error"]["code"] == "INTENT_NOT_SUPPORTED_FOR_REMOTE_REQUEST"
+    assert body["error"]["code"] == "PEER_CAPABILITY_MISMATCH"
     assert body["error"]["details"]["intent"] == "cost.split"
     assert relay.sent == []
 

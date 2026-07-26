@@ -28,6 +28,7 @@ from enishi_core.domains.cost_split_strategy import (
     OfferState,
     StrategyAction,
     _cost_split_policy,
+    _cost_split_preferred_ratio,
     next_action,
 )
 from enishi_core.errors import EnishiError
@@ -85,6 +86,7 @@ class CostSplitDomain(BaseDecisionDomain):
 
     intent = INTENT_COST_SPLIT
     delegation_key: str | None = "cost_split_negotiation"
+    supports_remote = True
     payload_model = CostSplitPayload
 
     def validate_request(self, body: NegotiationRequestLike) -> DomainRequest:
@@ -126,6 +128,281 @@ class CostSplitDomain(BaseDecisionDomain):
             proposed_share=request.proposed_share,
             deadline=request.deadline,
         )
+
+    def build_remote_request_payload(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Relay経由の初回REQUESTのワイヤpayload（Phase F5-b）。"""
+        return {
+            "intent": INTENT_COST_SPLIT,
+            "title": request["title"],
+            "total_amount": request["total_amount"],
+            "currency": request.get("currency") or "JPY",
+            "proposed_share": request["proposed_share"],
+            "deadline": request.get("deadline"),
+        }
+
+    def derive_own_position(
+        self,
+        session_db: Session,
+        clone: CloneAgent,
+        request_payload: dict[str, Any],
+        peer_agent_id: str,
+    ) -> dict[str, Any]:
+        """自分側の私的な立ち位置（Phase F5-b）。送信しないローカル専用データ。
+
+        `session_db` は現状このドメインでは使わない（ポリシー/選好は `clone` のプロファイルへ
+        直接持つため）。他ドメイン（`meeting_schedule`）の disclosure policy 参照のように、
+        将来 `session_db` を要する拡張が入りうるためシグネチャには残す。
+        """
+        policy = _cost_split_policy(clone)
+        preferred_ratio = min(_cost_split_preferred_ratio(clone), policy["reservation_ratio"])
+        return {
+            "title": request_payload["title"],
+            "total_amount": float(request_payload["total_amount"]),
+            "currency": request_payload.get("currency") or "JPY",
+            "deadline": request_payload.get("deadline"),
+            "proposed_share": float(request_payload["proposed_share"]),
+            "reservation_ratio": policy["reservation_ratio"],
+            "preferred_ratio": preferred_ratio,
+            "concession_ratio": policy["concession_ratio"],
+            "max_auto_accept_amount": policy["max_auto_accept_amount"],
+            "max_negotiable_amount": policy["max_negotiable_amount"],
+        }
+
+    def build_remote_propose_delta(self, own_position: dict[str, Any]) -> dict[str, Any]:
+        """初回PROPOSEのwire delta（Phase F5-b）。自分の初期提示額のみ。"""
+        return {"proposed_share": own_position["proposed_share"]}
+
+    def decide_remote_reply(
+        self,
+        clone: CloneAgent,
+        own_position: dict[str, Any],
+        received_public: dict[str, Any],
+        *,
+        role: str,
+        round_number: int,
+        peer_personal_agent_id: str,
+        delegation_enabled: bool,
+        high_value_approval_required: bool,
+        own_last_delta: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """相手の提示に対する次の一手を決める（Phase F5-b）。
+
+        `cost_split_strategy.next_action` をそのまま呼ぶ（判断ロジックは書き直さない）。
+        `Session` を要する判定（委任・`high_value` 承認要否）はドライバが先に評価し、
+        bool だけをここへ渡す既存の設計を踏襲する。
+        """
+        base_payload = {
+            "title": own_position.get("title", ""),
+            "total_amount": own_position.get("total_amount"),
+            "currency": own_position.get("currency") or "JPY",
+            "deadline": own_position.get("deadline"),
+        }
+        total_amount = float(own_position["total_amount"])
+        proposed_share = float(own_position["proposed_share"])
+        standing = float(received_public.get("proposed_share", proposed_share))
+        my_last_offer: float | None = None
+        if own_last_delta is not None and "proposed_share" in own_last_delta:
+            my_last_offer = float(own_last_delta["proposed_share"])
+
+        guard = evaluate_common_guards(
+            clone=clone,
+            delegation_enabled=delegation_enabled,
+            peer_personal_agent_id=peer_personal_agent_id,
+            not_delegated_reason_code="cost_split_negotiation_not_delegated",
+        )
+        guard_reason_codes = [*guard.pre_reason_codes, *guard.post_reason_codes]
+        evidence = {
+            **guard.evidence,
+            "standing_offer": round(standing, 2),
+            "round_number": round_number,
+        }
+
+        def approval_raw(agreed_share: float) -> dict[str, Any]:
+            return {
+                **base_payload,
+                "agreed_share": round(agreed_share, 2),
+                "standing_offer": round(standing, 2),
+                "round_number": round_number,
+            }
+
+        if guard_reason_codes:
+            return {
+                "outcome": "approval_required",
+                "reason_codes": guard_reason_codes,
+                "evidence": evidence,
+                "confidence": guard.confidence,
+                "policy_version": clone.version,
+                "reply_delta": {},
+                "agreement_value": None,
+                "approval_raw": approval_raw(standing),
+                "proposed_action": "ACCEPT",
+            }
+
+        state = OfferState(
+            round_number=round_number,
+            standing_offer=round(standing, 2),
+            my_last_offer=my_last_offer,
+        )
+        action: StrategyAction = next_action(
+            clone=clone,
+            role=role,  # type: ignore[arg-type]
+            total_amount=total_amount,
+            proposed_share=proposed_share,
+            state=state,
+            high_value_approval_required=high_value_approval_required,
+        )
+
+        if action.kind == "counter" and round_number >= _MAX_ROUNDS:
+            # D3と同じ打ち切りルール（run_cost_split_negotiation参照）:
+            # ラウンド上限に達しても交差しなかった場合は、黙って妥協を飲まず
+            # 手番のエージェントが自分の所有者へ承認エスカレーションする。
+            # next_action 自体は書き換えず、ドライバ相当のこの関数が結果をラップする。
+            action = StrategyAction(
+                kind="escalate", amount=None, reason_codes=["no_agreement_within_rounds"]
+            )
+
+        if action.kind == "accept":
+            agreed_share = round(action.amount if action.amount is not None else standing, 2)
+            return {
+                "outcome": "auto_accept",
+                "reason_codes": ["cost_split_within_position"],
+                "evidence": evidence,
+                "confidence": guard.confidence,
+                "policy_version": clone.version,
+                "reply_delta": {"agreed_share": agreed_share},
+                "agreement_value": {**base_payload, "agreed_share": agreed_share},
+                "approval_raw": {},
+                "proposed_action": "ACCEPT",
+            }
+
+        if action.kind == "counter":
+            assert action.amount is not None
+            new_offer = round(action.amount, 2)
+            return {
+                "outcome": "counter",
+                "reason_codes": ["cost_split_concession"],
+                "evidence": evidence,
+                "confidence": guard.confidence,
+                "policy_version": clone.version,
+                "reply_delta": {"proposed_share": new_offer},
+                "agreement_value": None,
+                "approval_raw": {},
+                "proposed_action": "COUNTER",
+            }
+
+        if action.kind == "escalate":
+            reason = (
+                action.reason_codes[0] if action.reason_codes else "cost_split_requires_approval"
+            )
+            return {
+                "outcome": "approval_required",
+                "reason_codes": [reason],
+                "evidence": evidence,
+                "confidence": guard.confidence,
+                "policy_version": clone.version,
+                "reply_delta": {},
+                "agreement_value": None,
+                "approval_raw": approval_raw(standing),
+                "proposed_action": "ACCEPT",
+            }
+
+        # reject
+        reason = action.reason_codes[0] if action.reason_codes else "cost_share_exceeds_limit"
+        return {
+            "outcome": "reject",
+            "reason_codes": [reason],
+            "evidence": evidence,
+            "confidence": guard.confidence,
+            "policy_version": clone.version,
+            "reply_delta": {"code": _reason_code_to_delta_code(reason)},
+            "agreement_value": None,
+            "approval_raw": {},
+            "proposed_action": "ACCEPT",
+        }
+
+    def remote_agreement_payload(self, agreed: dict[str, Any]) -> dict[str, Any]:
+        """遠隔交渉合意の agreed_payload（Phase F5-b）。"""
+        return _agreed_payload(
+            title=str(agreed.get("title", "")),
+            total_amount=float(agreed.get("total_amount", 0.0)),
+            currency=str(agreed.get("currency") or "JPY"),
+            agreed_share=float(agreed.get("agreed_share", 0.0)),
+            deadline=agreed.get("deadline"),
+        )
+
+    def agreement_value_from_accept_delta(
+        self, delta: dict[str, Any], request_payload: dict[str, Any]
+    ) -> Any:
+        """相手のACCEPT deltaから合意値を取り出す（Phase F5-b）。
+
+        `agreed_share` はdelta由来（相手が実際にACCEPTした額）、それ以外
+        （title/total_amount/currency/deadline）はこのセッションのREQUEST payload
+        （公開済みの文脈値）から補う。
+        """
+        return {
+            "title": request_payload.get("title", ""),
+            "total_amount": request_payload.get("total_amount"),
+            "currency": request_payload.get("currency") or "JPY",
+            "deadline": request_payload.get("deadline"),
+            "agreed_share": delta.get("agreed_share"),
+        }
+
+    def approval_context(self, raw: dict[str, Any]) -> dict[str, Any]:
+        """承認payloadの `proposal` / `public_context`（Phase F5-b）。
+
+        留保価格・効用パラメータ（`reservation_ratio` 等）は `raw` に含まれない
+        （`decide_remote_reply` がそもそも積まない）ため、ここでも露出しない。
+        """
+        proposal = {
+            "title": raw.get("title", ""),
+            "total_amount": raw.get("total_amount"),
+            "currency": raw.get("currency") or "JPY",
+            "deadline": raw.get("deadline"),
+            "agreed_share": raw.get("agreed_share"),
+        }
+        public_context = {
+            "standing_offer": raw.get("standing_offer"),
+            "round_number": raw.get("round_number"),
+        }
+        return {"proposal": proposal, "public_context": public_context}
+
+    def approval_reply(
+        self,
+        *,
+        approved: bool,
+        target_status: str,
+        proposal: dict[str, Any],
+        public_context: dict[str, Any],
+        override: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """承認解決の結果からwireメッセージを組み立てる（Phase F5-b）。"""
+        if not approved:
+            code = "HUMAN_REJECTED" if target_status == "rejected" else "APPROVAL_EXPIRED"
+            return {"message_type": "REJECT", "delta": {"code": code}, "agreement_value": None}
+
+        agreed_share = proposal.get("agreed_share")
+        if override is not None and override.get("agreed_share") is not None:
+            agreed_share = override["agreed_share"]
+        if agreed_share is None:
+            raise EnishiError(
+                code="INVALID_APPROVAL_SELECTION",
+                message="承認する分担額を確認できません。",
+                status_code=422,
+            )
+        agreed_share = round(float(agreed_share), 2)
+
+        agreement_value = {
+            "title": proposal.get("title", ""),
+            "total_amount": proposal.get("total_amount"),
+            "currency": proposal.get("currency") or "JPY",
+            "deadline": proposal.get("deadline"),
+            "agreed_share": agreed_share,
+        }
+        return {
+            "message_type": "ACCEPT",
+            "delta": {"agreed_share": agreed_share},
+            "agreement_value": agreement_value,
+        }
 
 
 def _reason_code_to_delta_code(reason_code: str) -> str:

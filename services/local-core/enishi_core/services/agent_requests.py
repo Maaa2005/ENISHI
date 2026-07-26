@@ -213,14 +213,17 @@ def submit_agent_request(
             details={"intent": interpreted.intent},
         )
 
-    if not delegation_enabled(
-        session, user_id, "schedule_negotiation", default=True
-    ):
+    # F5-b: 「schedule_negotiation」決め打ちだと cost.split 等の他ドメインの委任OFFが
+    # 効かない（常に meeting 用のキーを見てしまう）ため、domain.delegation_key を使う
+    # （`services/remote_negotiation.py` と同じ一般化。meeting は delegation_key=None なので
+    # 挙動は変わらない）。
+    delegation_key = domain.delegation_key or "schedule_negotiation"
+    if not delegation_enabled(session, user_id, delegation_key, default=True):
         raise EnishiError(
             code="NEGOTIATION_PERMISSION_DENIED",
-            message="日程調整は本人代理AIへ委任されていません。",
+            message="この交渉は本人代理AIへ委任されていません。",
             status_code=403,
-            details={"operation": "schedule_negotiation"},
+            details={"operation": delegation_key},
         )
     peer = resolve_trusted_peer(session, peer_agent_id, text)
     personal = ensure_personal_agent(session, user_id)

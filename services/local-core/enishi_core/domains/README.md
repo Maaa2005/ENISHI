@@ -135,6 +135,68 @@ import しているため残す）で、実体は持たない。全ドメイン�
    `tests/test_cost_split.py` は「最小情報の原則」（responder の予算・留保価格・効用パラメータを
    メッセージに載せない）を全メッセージ走査で検証する例として参照できる。
 
+## 遠隔対応を追加する（`supports_remote = True` にする、Phase F1/F2/F5）
+
+上の手順で作ったドメインは、まずローカル交渉（`start()` が両者のクローンを直接呼ぶ経路）だけに
+対応した状態になる。Relay経由で別ノードの相手と交渉する（`services/remote_negotiation.py`）には、
+以下の7フックすべてを実装してから `supports_remote = True` にする。**実装が終わるまでは
+`False` のままにすること**（`False` の間は自ノードのAgent Cardにこのintentが宣言されず、
+`submit_agent_request` も自然言語からの遠隔依頼を422で拒否するため、相手に「対応している」と
+誤って伝わることがない）。
+
+参考実装は `domains/meeting_schedule.py`（離散候補集合の交差）と `domains/cost_split.py`
+（連続値の譲歩、Phase F5-b）の2つ。型が近い方を見ること。
+
+1. **`build_remote_request_payload(request: dict) -> dict`** — Relay経由の初回REQUESTに乗せる
+   ワイヤpayloadを組み立てる。ここに書いたキーはそのまま相手ノードへ送信されるため、
+   最小情報の原則（下記）に反する私的な値を入れないこと。
+2. **`derive_own_position(session_db, clone, request_payload, peer_agent_id) -> dict`** —
+   送受信どちらの側でも「自分の私的な立ち位置」を組み立てる（**送信しない**、ローカル専用の
+   中間値）。ローカル交渉と違い、リモートでは相手のクローンが手元にないため、判断に必要な
+   自分側のポリシー・選好をここで一度だけ算出する。
+3. **`build_remote_propose_delta(own_position: dict) -> dict`** — 初回PROPOSEのwire delta。
+   `own_position` のうち、相手に見せてよい提示値だけを抜き出す。
+4. **`decide_remote_reply(clone, own_position, received_public, *, role, round_number,
+   peer_personal_agent_id, delegation_enabled, high_value_approval_required,
+   own_last_delta) -> dict`** — 相手の提示（PROPOSE/COUNTER）に対する次の一手を決める、
+   このフックの中核。戻り値の契約は `domains/base.py` の `DecisionDomain.decide_remote_reply`
+   のdocstringに全フィールド（`outcome` / `reason_codes` / `evidence` / `confidence` /
+   `policy_version` / `reply_delta` / `agreement_value` / `approval_raw` / `proposed_action`）が
+   明記されているので、実装前に必ず読むこと。
+   - **既存のローカル用「戦略」関数（例: `cost_split_strategy.next_action`）があるなら、
+     判断ロジックを書き直さずそのまま呼ぶ**。ローカル/リモートで判断コードが分岐すると、
+     片方だけ直してもう片方が古いままになる不具合源になる（上の「戦略と進行の分離」節と同じ
+     教訓）。`Session` が必要な判定（`delegation_enabled` / `approval_required` など）は
+     ドライバ（`services/remote_negotiation.py` の `_handle_envelope`）が先に評価し、bool
+     だけを引数で渡す。
+   - 委任OFF・confidence閾値未満・relationship承認要求の共通ガードは
+     `domains/common.py` の `evaluate_common_guards` を使う。
+5. **`remote_agreement_payload(agreed: Any) -> dict`** — 合意成立時、`Agreement.agreed_payload`
+   に保存する形を組み立てる。
+6. **`agreement_value_from_accept_delta(delta: dict, request_payload: dict) -> Any`**
+   （Phase F5-a）— 相手から届いたACCEPTのwire deltaから合意値を取り出す。ACCEPTのdeltaは
+   最小情報の原則により合意値そのもの（例 `agreed_share`）しか持たないことが多く、
+   `title` / `total_amount` のような既に公開済みの文脈値は `request_payload`
+   （このセッションのREQUESTペイロード、`services/remote_negotiation.py::_request_payload`
+   経由で渡される）から補ってよい。取り出した値はそのまま `remote_agreement_payload()` へ渡される。
+7. **`approval_context(raw: dict) -> {"proposal": dict, "public_context": dict}`**
+   （Phase F2） — `decide_remote_reply` が `approval_required` を返したときに人間承認へ回す
+   payloadを組み立てる。`raw`（`decide_remote_reply` の `approval_raw`）に私的情報を積んでいなければ
+   このフックで漏れる心配はない。
+8. **`approval_reply(*, approved, target_status, proposal, public_context, override) -> dict`**
+   — 人間が承認/却下した結果から、送り返すwireメッセージ（`message_type` / `delta` /
+   `agreement_value`）を組み立てる。
+
+### 最小情報の原則の徹底（機械的に検証すること）
+
+responder（あるいは応答する側）の予算・留保価格・効用パラメータ・選好の生値は、
+**上記いずれのフックの戻り値にも一切含めない**。`derive_own_position` はこれらを含んでよい
+（送信されないため）が、`build_remote_request_payload` / `build_remote_propose_delta` /
+`decide_remote_reply` の `reply_delta` / `remote_agreement_payload` / `approval_context` の
+戻り値には決して含めないこと。新しいドメインを追加したら、`tests/test_remote_cost_split.py`
+（あるいは `tests/test_cost_split.py`）の禁止キー再帰走査パターンに倣い、全エンベロープの
+`payload` / `delta` と承認payloadを走査するテストを追加すること。
+
 ## 注意
 
 - `domains` パッケージは `schemas` を import しない（循環 import を避けるため）。

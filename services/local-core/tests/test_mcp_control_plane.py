@@ -109,7 +109,8 @@ def test_signed_card_registers_pending_and_tampering_is_rejected(
         # Phase F3: 名刺の supported_intents は supports_remote=True のドメインだけを宣言する。
         # task.request は遠隔ドライバを実装していない（supports_remote=False）ため、
         # ここに含まれなくなった（旧挙動は実装していない能力を偽って宣言するバグだった）。
-        "supported_intents": ["meeting.schedule"],
+        # Phase F5-b: cost.split が遠隔ドライバを実装し supports_remote=True になったため追加。
+        "supported_intents": ["cost.split", "meeting.schedule"],
         "protocol_versions": ["aun/0.2", "aun/0.1"],
     }
 

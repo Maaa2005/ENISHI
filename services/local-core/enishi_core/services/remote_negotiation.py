@@ -42,7 +42,6 @@ from enishi_core.services.policies import approval_required, delegation_enabled
 from enishi_core.services.public_reasons import to_public_reason
 from enishi_core.services.relay_client import RelayTransport
 
-_OFFER_SIZE = 5
 _PROTOCOL = "aun/0.2"
 
 
@@ -904,26 +903,29 @@ def _handle_envelope(
                 {"public_reason": to_public_reason(decision.reason_codes)},
             )
         else:
+            # ラウンド上限に達してもドメインが自己終端しなかった場合の汎用フォールバック
+            # （プロトコル層の `protocol_state.MAX_COUNTER_ROUNDS` に基づく。ドメイン非依存の
+            # エラーコード。meetingはこの経路で終端しうる。cost.splitは`decide_remote_reply`が
+            # 最終ラウンドで自ら"approval_required"へ倒すため通常ここへは来ない）。
             _send_reply(
                 session_db, relay, negotiation, sender_personal_id, sender, sender_node,
                 "ERROR", sequence + 1,
-                {"code": "NO_AVAILABLE_SLOT"},
+                {"code": "NEGOTIATION_ROUNDS_EXHAUSTED"},
             )
             negotiation.status = NegotiationStatus.FAILED.value
-            negotiation.result = {"code": "NO_AVAILABLE_SLOT", "rounds": rounds}
+            negotiation.result = {"code": "NEGOTIATION_ROUNDS_EXHAUSTED", "rounds": rounds}
     elif message_type == "ACCEPT":
+        domain = get_domain(negotiation.intent)
+        agreement_value = domain.agreement_value_from_accept_delta(
+            envelope.get("delta", {}), _request_payload(session_db, session_id)
+        )
+        agreed_payload = domain.remote_agreement_payload(agreement_value)
         negotiation.status = NegotiationStatus.AGREED.value
         negotiation.result = {
-            "selected_slot": dict(envelope.get("delta", {}).get("selected_slot", {})),
+            **agreed_payload,
             "rounds": _counter_rounds(session_db, session_id) + 1,
         }
-        _create_remote_agreement(
-            session_db,
-            negotiation,
-            get_domain(negotiation.intent).remote_agreement_payload(
-                negotiation.result["selected_slot"]
-            ),
-        )
+        _create_remote_agreement(session_db, negotiation, agreed_payload)
     elif message_type in ("REJECT", "ERROR"):
         negotiation.status = NegotiationStatus.FAILED.value
         negotiation.result = {

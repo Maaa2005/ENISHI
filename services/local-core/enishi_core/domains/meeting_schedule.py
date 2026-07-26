@@ -230,6 +230,12 @@ class MeetingScheduleDomain(BaseDecisionDomain):
         """遠隔交渉合意の agreed_payload（Phase F1: `_meeting_agreement_payload` を移設）。"""
         return {"selected_slot": dict(agreed)}
 
+    def agreement_value_from_accept_delta(
+        self, delta: dict[str, Any], request_payload: dict[str, Any]
+    ) -> Any:
+        """相手のACCEPT deltaから合意値を取り出す（Phase F5-a）。"""
+        return dict(delta.get("selected_slot", {}))
+
     def approval_context(self, raw: dict[str, Any]) -> dict[str, Any]:
         """承認payloadの `proposal` / `public_context`（Phase F2）。
 

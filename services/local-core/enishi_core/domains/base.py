@@ -140,6 +140,19 @@ class DecisionDomain(Protocol):
         """遠隔交渉が合意に達したときの `Agreement.agreed_payload` を組み立てる（Phase F1）。"""
         ...
 
+    def agreement_value_from_accept_delta(
+        self, delta: dict[str, Any], request_payload: dict[str, Any]
+    ) -> Any:
+        """相手から届いたACCEPTのwire deltaから、合意値を取り出す（Phase F5-a）。
+
+        取り出した値は `remote_agreement_payload()` へそのまま渡す。ドライバ
+        （`services/remote_negotiation.py`）が `selected_slot` / `agreed_share` 等の
+        ドメイン固有キーを直接読まずに済むようにするための継ぎ目。`request_payload`
+        （このセッションのREQUESTペイロード）は、ACCEPTのdelta単体には含まれない
+        `title` / `total_amount` のような公開済みの文脈値を補うために渡す。
+        """
+        ...
+
     def approval_context(self, raw: dict[str, Any]) -> dict[str, Any]:
         """人間承認payloadの `proposal` / `public_context` を組み立てる（Phase F2）。
 
@@ -232,6 +245,11 @@ class BaseDecisionDomain:
         raise NotImplementedError
 
     def remote_agreement_payload(self, agreed: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def agreement_value_from_accept_delta(
+        self, delta: dict[str, Any], request_payload: dict[str, Any]
+    ) -> Any:
         raise NotImplementedError
 
     def approval_context(self, raw: dict[str, Any]) -> dict[str, Any]:

@@ -23,7 +23,8 @@ def test_card_supported_intents_only_includes_supports_remote_domains(
         session.close()
 
     supported_intents = card["capabilities"]["supported_intents"]
-    assert supported_intents == ["meeting.schedule"]
+    # Phase F5-b: cost.split が遠隔フックを実装し supports_remote=True になったため、
+    # meeting.schedule と並んで名刺に宣言される。
+    assert supported_intents == ["cost.split", "meeting.schedule"]
     # supports_remote=False のドメインは宣言しない（実装していない能力を約束しないため）。
     assert "task.request" not in supported_intents
-    assert "cost.split" not in supported_intents
