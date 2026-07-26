@@ -591,3 +591,200 @@ def test_next_action_is_a_pure_function_callable_without_session() -> None:
     )
     assert accept_action.kind == "accept"
     assert accept_action.amount == 3000.0
+
+
+# ---------------------------------------------------------------------------
+# Phase E: E1（initiator の下限到達は escalate、reject ではない）/ E2（decider_clone_id の
+# de-hardcode、responder決め打ちからの脱却）を検証する。
+# ---------------------------------------------------------------------------
+
+
+def test_initiator_action_escalates_when_conceded_to_floor_but_offer_still_below() -> None:
+    """新規1. E1（戦略）: initiator が既に下限Lまで譲歩済みで、相手の提示がまだLに届かない場合、
+    reject ではなく escalate(["cost_share_below_reservation"]) を返す（純粋関数、Session不要）。
+    """
+    from enishi_core.domains.cost_split_strategy import OfferState, _initiator_action
+    from enishi_core.models import CloneAgent
+
+    initiator_clone = CloneAgent(
+        policy_profile={
+            "cost_split": {
+                "reservation_ratio": 0.5,
+                "concession_ratio": 0.5,
+            }
+        },
+    )
+    # total=10000 -> L_policy=5000, proposed_share=3000 -> floor=min(5000,3000)=3000
+    # 既に floor まで譲歩済み(my_last_offer=3000)、相手の提示(2000)はまだ floor に届かない
+    action = _initiator_action(
+        initiator_clone,
+        total_amount=10000.0,
+        proposed_share=3000.0,
+        state=OfferState(round_number=3, standing_offer=2000.0, my_last_offer=3000.0),
+    )
+    assert action.kind == "escalate"
+    assert action.amount is None
+    assert action.reason_codes == ["cost_share_below_reservation"]
+
+
+def test_initiator_escalation_creates_approval_for_initiators_owner(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """新規2. E1（ドライバ）: initiator が譲歩の下限に達しても responder の提示が届かない場合、
+    reject ではなく escalate し、approval は responder ではなく initiator の所有者へ作られる。
+    """
+    initiator, initiator_clone_id, responder, responder_clone_id = _setup_pair_with_clone_ids(
+        client, auth_headers
+    )
+    _set_cost_split_profile(
+        initiator_clone_id,
+        policy={
+            "max_auto_accept_amount": 100.0,
+            "max_negotiable_amount": 50000.0,
+            "reservation_ratio": 0.5,
+            "concession_ratio": 0.5,
+        },
+    )
+    _set_cost_split_profile(
+        responder_clone_id,
+        policy={
+            "max_auto_accept_amount": 100.0,
+            "max_negotiable_amount": 50000.0,
+            "reservation_ratio": 0.6,
+            "concession_ratio": 0.5,
+        },
+        preference={"preferred_ratio": 0.1},
+    )
+    # total=10000, proposed_share=3000 -> floor=min(5000,3000)=3000
+    # （initiatorの要求は既に自分の下限）
+    # round1(responder): opening=1000, counter -> min(6000,1000+(3000-1000)*0.5)=2000
+    # round2(initiator): x_i=3000<=floor(3000) かつ standing=2000<floor(3000) -> escalate
+    negotiation = _cost_split(
+        client,
+        auth_headers,
+        initiator,
+        responder,
+        total_amount=10000.0,
+        proposed_share=3000.0,
+    )
+    assert negotiation["status"] == "waiting_approval"
+    approval_id = negotiation["pending_approval_id"]
+    assert approval_id is not None
+
+    approvals = client.get(f"/v1/approvals?user_id={initiator}", headers=auth_headers).json()
+    matching = [a for a in approvals if a["id"] == approval_id]
+    assert len(matching) == 1, "approval は initiator の所有者へ作られるべき"
+    approval = matching[0]
+    assert approval["user_id"] == initiator
+    assert approval["payload"]["decider_clone_id"] == initiator_clone_id
+    assert approval["payload"]["reason"] == "cost_share_below_reservation"
+
+    # responder 側には作られない
+    responder_approvals = client.get(
+        f"/v1/approvals?user_id={responder}", headers=auth_headers
+    ).json()
+    assert all(a["id"] != approval_id for a in responder_approvals)
+
+
+def test_max_rounds_parity_independent_initiator_can_be_final_decider(
+    client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """新規3. E1+E2: `_MAX_ROUNDS` を偶数(4)に monkeypatch しても、最終手番が initiator に
+    なった場合に initiator の所有者へ正しくエスカレーションされ、承認解決時も initiator が
+    送信者になる（responder 決め打ち・奇数ラウンド決め打ちのどちらにも依存しないことの証明）。
+    """
+    import enishi_core.domains.cost_split as cost_split_module
+
+    monkeypatch.setattr(cost_split_module, "_MAX_ROUNDS", 4)
+
+    negotiation, messages = _slow_convergence_negotiation(client, auth_headers)
+    assert negotiation["status"] == "waiting_approval"
+    approval_id = negotiation["pending_approval_id"]
+    assert approval_id is not None
+
+    initiator_clone_id = messages[0]["sender_agent_id"]
+    responder_clone_id = messages[0]["receiver_agent_id"]
+
+    approvals = client.get("/v1/approvals", headers=auth_headers).json()
+    approval = next(a for a in approvals if a["id"] == approval_id)
+    # ラウンド4（偶数）の手番は initiator 側であり、decider は initiator。
+    assert approval["payload"]["decider_clone_id"] == initiator_clone_id
+    assert approval["payload"]["reason"] == "cost_share_below_reservation"
+
+    approved = client.post(f"/v1/approvals/{approval_id}/approve", headers=auth_headers)
+    assert approved.status_code == 200
+
+    resolved_messages = client.get(
+        f"/v1/negotiations/{negotiation['id']}/messages", headers=auth_headers
+    ).json()
+    final = resolved_messages[-1]
+    assert final["message_type"] == "ACCEPT"
+    # E2: responder 決め打ちなら sender は responder_clone_id になってしまうが、
+    # decider_clone_id を参照するため initiator が送信者になる。
+    assert final["sender_agent_id"] == initiator_clone_id
+    assert final["receiver_agent_id"] == responder_clone_id
+
+
+def test_on_approval_resolved_falls_back_to_responder_without_decider_clone_id(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """新規4. E2: payload に decider_clone_id が無い approval（E2以前・他ドメイン由来を模す）は
+    従来どおり responder が送信者になる（後方互換フォールバック）。
+    """
+    from enishi_core.database import get_session
+    from enishi_core.models import (
+        Approval,
+        ApprovalStatus,
+        NegotiationMessage,
+        NegotiationSession,
+        NegotiationStatus,
+    )
+    from enishi_core.services import approvals as approval_service
+    from enishi_core.services.negotiation import on_approval_resolved
+
+    _initiator, initiator_clone_id, responder, responder_clone_id = _setup_pair_with_clone_ids(
+        client, auth_headers
+    )
+    session = next(get_session())
+    try:
+        negotiation = NegotiationSession(
+            initiator_clone_id=initiator_clone_id,
+            responder_clone_id=responder_clone_id,
+            intent="cost.split",
+            topic="旧形式承認",
+            status=NegotiationStatus.WAITING_APPROVAL.value,
+        )
+        session.add(negotiation)
+        session.flush()
+        approval: Approval = approval_service.create_approval(
+            session,
+            user_id=responder,
+            action_type="negotiation_decision",
+            description="テスト",
+            level=1,
+            payload={
+                "session_id": negotiation.id,
+                "intent": "cost.split",
+                "reason": "cost_share_exceeds_reservation",
+                "proposed_action": "ACCEPT",
+                "payload": {"agreed_share": 4000.0},
+                # decider_clone_id をあえて積まない（E2以前に作られた approval を模す）
+            },
+        )
+        negotiation.pending_approval_id = approval.id
+        session.commit()
+
+        approval.status = ApprovalStatus.APPROVED.value
+        on_approval_resolved(session, approval)
+
+        message = (
+            session.query(NegotiationMessage)
+            .filter_by(session_id=negotiation.id)
+            .order_by(NegotiationMessage.sequence.desc())
+            .first()
+        )
+        assert message is not None
+        assert message.sender_agent_id == responder_clone_id
+        assert message.receiver_agent_id == initiator_clone_id
+    finally:
+        session.close()

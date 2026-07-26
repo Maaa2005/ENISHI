@@ -21,6 +21,7 @@ from enishi_core.domains.common import (
     append_message,
     create_agreement,
     create_negotiation_approval,
+    evaluate_common_guards,
     require_active_clone,
 )
 from enishi_core.domains.cost_split_strategy import (
@@ -209,12 +210,10 @@ def run_cost_split_negotiation(
 
     offer = round(proposed_share, 2)
 
-    # 事前ガード（全ドメイン共通・enishi_core.services.decision_evaluator.evaluate_common_guards）
+    # 事前ガード（全ドメイン共通・enishi_core.domains.common.evaluate_common_guards）
     # 委任OFF / confidence閾値未満 / relationship が承認要求 -> 承認エスカレーション。
     # ローカル交渉には relay 経由の相手 personal agent id が無いため、
     # 関係性ポリシーの照合キーには initiator のクローンIDを代用する。
-    from enishi_core.services.decision_evaluator import evaluate_common_guards
-
     delegation_ok = delegation_enabled(
         session_db, responder.user_id, "cost_split_negotiation", default=True
     )

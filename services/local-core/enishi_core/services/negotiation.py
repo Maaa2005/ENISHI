@@ -214,12 +214,28 @@ def on_approval_resolved(session_db: Session, approval: Approval) -> None:
         negotiation.status = NegotiationStatus.FAILED.value
         negotiation.result = {"code": code, "approval_id": approval.id}
 
+    # E2: どちらのクローンがエスカレーションしたか（decider）は create_negotiation_approval が
+    # payload に記録している。responder 決め打ちだと _MAX_ROUNDS のパリティ
+    # （手番が必ず responder で終わる）に暗黙に依存してしまうため、記録された
+    # decider_clone_id を使う。
+    # 後方互換: この変更以前に作られた approval（および decider_clone_id を積まない
+    # 他ドメイン経由）は従来どおり responder_clone_id を使う。
+    decider_clone_id = approval.payload.get("decider_clone_id")
+    sender_agent_id = (
+        str(decider_clone_id) if decider_clone_id else negotiation.responder_clone_id
+    )
+    receiver_agent_id = (
+        negotiation.responder_clone_id
+        if sender_agent_id == negotiation.initiator_clone_id
+        else negotiation.initiator_clone_id
+    )
+
     session_db.add(
         NegotiationMessage(
             session_id=negotiation.id,
             sequence=last_sequence + 1,
-            sender_agent_id=negotiation.responder_clone_id,
-            receiver_agent_id=negotiation.initiator_clone_id,
+            sender_agent_id=sender_agent_id,
+            receiver_agent_id=receiver_agent_id,
             message_type=message_type,
             intent=negotiation.intent,
             payload=message_payload,

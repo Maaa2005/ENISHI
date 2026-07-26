@@ -160,6 +160,7 @@ def test_remote_low_confidence_waits_for_human_and_responds_once(
     from enishi_core.database import get_session
     from enishi_core.models import (
         Agreement,
+        CloneAgent,
         NegotiationDecision,
         NegotiationSession,
         PeerAgent,
@@ -171,6 +172,18 @@ def test_remote_low_confidence_waits_for_human_and_responds_once(
     from enishi_core.services.remote_negotiation import process_inbox
 
     _user_id, _clone_id = _user_and_clone(client, auth_headers)
+    # E3-c: 活性化時に confidence_score が閾値まで引き上げられるようになったため
+    # （活性化＝人間のレビュー通過という承認ゲート）、このテストの前提である
+    # 「confidenceが低い」状態を、活性化後に記憶削除などで信頼度が下がったケースとして
+    # 明示的に作る（enishi.md §17、outdated クローン）。仕様変更ではなくフィクスチャの追随。
+    session = next(get_session())
+    try:
+        clone = session.get(CloneAgent, _clone_id)
+        assert clone is not None
+        clone.confidence_score = 0.4
+        session.commit()
+    finally:
+        session.close()
     sender_identity, sender_private = ensure_node_keypair(tmp_path / "sender")
     created = client.post(
         "/v1/peers",

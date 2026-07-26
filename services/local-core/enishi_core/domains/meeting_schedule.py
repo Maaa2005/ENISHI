@@ -15,8 +15,12 @@ from sqlalchemy.orm import Session
 
 from enishi_core.domains.base import BaseDecisionDomain, DomainRequest, NegotiationRequestLike
 from enishi_core.domains.common import (
+    DecisionEvaluation,
+    DecisionOutcome,
     append_message,
     create_agreement,
+    create_negotiation_approval,
+    evaluate_common_guards,
     require_active_clone,
 )
 from enishi_core.domains.value_objects import DateRange, TimeRange
@@ -24,6 +28,7 @@ from enishi_core.errors import EnishiError
 from enishi_core.models import (
     CloneAgent,
     MessageType,
+    NegotiationDecision,
     NegotiationMessage,
     NegotiationSession,
     NegotiationStatus,
@@ -32,6 +37,7 @@ from enishi_core.models import (
 )
 from enishi_core.services.audit import log_event
 from enishi_core.services.memories import exportable_memories
+from enishi_core.services.policies import delegation_enabled as delegation_enabled_policy
 from enishi_core.services.scheduling import (
     Slot,
     candidate_slots,
@@ -110,6 +116,10 @@ class MeetingScheduleDomain(BaseDecisionDomain):
             date_range=request.date_range,
             preferred_time_ranges=request.preferred_time_ranges,
         )
+
+    def evaluate_decision(self, **kwargs: Any) -> DecisionEvaluation:
+        """E3-a: ローカル/リモート両ドライバが同じ判断コードへレジストリ経由でたどり着く継ぎ目。"""
+        return evaluate_meeting_schedule(**kwargs)
 
 
 def _slot_label(slot: Slot) -> str:
@@ -288,12 +298,60 @@ def run_negotiation(
         initiator, responder, MessageType.PROPOSE, delta={"candidate_slots": current_offer}
     )
 
+    timezone_by_clone = {initiator.id: initiator_timezone, responder.id: responder_timezone}
+
     sender, receiver = initiator, responder
     for round_number in range(1, _MAX_ROUNDS + 1):
         rounds = round_number
         common = intersect_slots(candidates_by_clone[receiver.id], current_offer)
         if common:
             selected_slot = common[0]
+            # E3-b: ACCEPTする直前に、所有者の delegation/confidence/relationship を通す
+            # （E3-a の評価関数、`domains/README.md` の「戦略と進行の分離」参照）。
+            # これは意図的な挙動変更である。ローカル交渉が所有者の権限を無視して
+            # 自動合意していたのは「人間の価値観と権限を持つエージェント」という
+            # ENISHI の定義に反するため（Phase E 仕様書 E3-b）。
+            evaluation = evaluate_meeting_schedule(
+                clone=receiver,
+                delegation_enabled=delegation_enabled_policy(
+                    session_db, receiver.user_id, "schedule_negotiation", default=True
+                ),
+                common_slot_count=len(common),
+                selected_slot=selected_slot,
+                peer_personal_agent_id=sender.id,
+                timezone=timezone_by_clone.get(receiver.id, "UTC"),
+            )
+            session_db.add(
+                NegotiationDecision(
+                    session_id=negotiation.id,
+                    clone_id=receiver.id,
+                    policy_version=evaluation.policy_version,
+                    outcome=evaluation.outcome,
+                    reason_codes=evaluation.reason_codes,
+                    evidence=evaluation.evidence,
+                    confidence=evaluation.confidence,
+                )
+            )
+            if evaluation.outcome != "auto_accept":
+                reason = (
+                    evaluation.reason_codes[0]
+                    if evaluation.reason_codes
+                    else "meeting_decision_requires_approval"
+                )
+                create_negotiation_approval(
+                    session_db,
+                    receiver,
+                    negotiation,
+                    {
+                        "intent": INTENT_MEETING_SCHEDULE,
+                        "topic": topic,
+                        "duration_minutes": duration_minutes,
+                        "selected_slot": selected_slot,
+                    },
+                    reason=reason,
+                    sequence=len(messages) + 1,
+                )
+                break
             add_message(
                 receiver, sender, MessageType.ACCEPT, delta={"selected_slot": selected_slot}
             )
@@ -432,4 +490,69 @@ def evaluate_meeting_preferences(
             "selected_time_within_preference": within_preferred,
             "selected_time_avoided": within_avoided,
         },
+    )
+
+
+def evaluate_meeting_schedule(
+    *,
+    clone: CloneAgent,
+    delegation_enabled: bool,
+    common_slot_count: int,
+    selected_slot: dict[str, Any] | None,
+    peer_personal_agent_id: str,
+    timezone: str = "UTC",
+) -> DecisionEvaluation:
+    """公開可能な集約値だけを根拠に、決定的な順序で判断する（E3-a）。
+
+    `cost_split_strategy.next_action` と同じ思想の**純粋な評価関数**: 自分の `clone` と
+    公開可能な集約値だけを受け取り、`Session` も相手の `CloneAgent` も受け取らない。
+    ローカル（`run_negotiation`）とリモート（`services/remote_negotiation.py`）の両ドライバが
+    `enishi_core.domains.get_domain("meeting.schedule")` 経由でここへたどり着くことで、
+    「日程調整の判断」の二重化を構造的に解消する（進行＝ループはドライバ側に残す。E3-d）。
+
+    薄いラッパだったものをここへ移した。共通ガードは `evaluate_common_guards`
+    （`domains/common.py`）、会議固有の評価は `evaluate_meeting_preferences` が担う。
+    """
+    guards = evaluate_common_guards(
+        clone=clone,
+        delegation_enabled=delegation_enabled,
+        peer_personal_agent_id=peer_personal_agent_id,
+        not_delegated_reason_code="schedule_negotiation_not_delegated",
+    )
+    domain_result = evaluate_meeting_preferences(
+        clone=clone,
+        selected_slot=selected_slot,
+        timezone=timezone,
+    )
+
+    # 現行の追加順: not_delegated -> confidence -> auto_accept_disabled ->
+    # outside_preferred_time -> time_avoided -> relationship_requires_approval
+    reason_codes = [
+        *guards.pre_reason_codes,
+        *domain_result.reason_codes,
+        *guards.post_reason_codes,
+    ]
+
+    outcome: DecisionOutcome
+    if reason_codes:
+        outcome = "approval_required"
+    elif common_slot_count > 0:
+        outcome = "auto_accept"
+        reason_codes = ["common_slot_within_delegation"]
+    else:
+        outcome = "counter"
+        reason_codes = ["no_common_slot"]
+
+    evidence = {
+        **guards.evidence,
+        **domain_result.evidence,
+        "common_slot_count": common_slot_count,
+    }
+
+    return DecisionEvaluation(
+        outcome=outcome,
+        reason_codes=reason_codes,
+        evidence=evidence,
+        confidence=guards.confidence,
+        policy_version=clone.version,
     )

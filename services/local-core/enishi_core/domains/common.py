@@ -5,7 +5,8 @@
 部品（アクティブクローンの取得、合意の保存、承認の作成、メッセージの採番）だけ。
 """
 
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -22,6 +23,87 @@ from enishi_core.models import (
 )
 from enishi_core.services import approvals as approval_service
 from enishi_core.services.audit import log_event
+
+DecisionOutcome = Literal["auto_accept", "approval_required", "counter", "reject"]
+
+# E3-c: クローンが active になるのは人間のレビューを通った時点であり、活性化そのものが
+# 承認ゲートである（services/clones.py::activate_clone 参照）。よってこの閾値自体は
+# 変更しない。記憶削除等で活性化後に confidence が下がったケース（enishi.md §17）で
+# 正しく発火させるためのガードとして残す。
+CONFIDENCE_THRESHOLD = 0.6
+
+
+@dataclass(frozen=True)
+class DecisionEvaluation:
+    """ドメインの終端判断1件分の評価結果。"""
+
+    outcome: DecisionOutcome
+    reason_codes: list[str]
+    evidence: dict[str, Any]
+    confidence: float
+    policy_version: int
+
+
+@dataclass(frozen=True)
+class CommonGuardResult:
+    """全ドメイン共通のガード判定結果。
+
+    delegation/confidence は判断の先頭に、relationship は末尾に来る（既存の並び順）ため、
+    reason_codes を pre/post に分けて呼び出し側でドメイン固有の理由を挟み込めるようにする。
+    """
+
+    confidence: float
+    pre_reason_codes: list[str]
+    post_reason_codes: list[str]
+    evidence: dict[str, Any]
+
+
+def evaluate_common_guards(
+    *,
+    clone: CloneAgent,
+    delegation_enabled: bool,
+    peer_personal_agent_id: str,
+    not_delegated_reason_code: str,
+) -> CommonGuardResult:
+    """委任・confidence・関係性という、全ドメイン共通のガードを評価する。
+
+    E3-a: 元は `services/decision_evaluator.py` にあったが、`domains/meeting_schedule.py`
+    などドメイン側の評価関数からも参照する必要があるため、循環 import を避けて
+    `domains/common.py`（どの構造からも参照できる共通部品置き場）へ移した。
+    `services/decision_evaluator.py` はここから再エクスポートして後方互換を保つ。
+    """
+    confidence = max(0.0, min(1.0, float(clone.confidence_score)))
+
+    pre_reason_codes: list[str] = []
+    if not delegation_enabled:
+        pre_reason_codes.append(not_delegated_reason_code)
+    if confidence < CONFIDENCE_THRESHOLD:
+        pre_reason_codes.append("clone_confidence_below_threshold")
+
+    relationship_auto_accept: bool | None = None
+    relationships = clone.preference_profile.get("relationships", {})
+    if isinstance(relationships, dict):
+        relationship = relationships.get(peer_personal_agent_id, {})
+        if isinstance(relationship, dict) and isinstance(
+            relationship.get("allow_auto_accept"), bool
+        ):
+            relationship_auto_accept = relationship["allow_auto_accept"]
+
+    post_reason_codes: list[str] = []
+    if relationship_auto_accept is False:
+        post_reason_codes.append("relationship_requires_approval")
+
+    return CommonGuardResult(
+        confidence=confidence,
+        pre_reason_codes=pre_reason_codes,
+        post_reason_codes=post_reason_codes,
+        evidence={
+            "delegation_enabled": delegation_enabled,
+            "clone_confidence": confidence,
+            "confidence_threshold": CONFIDENCE_THRESHOLD,
+            "relationship_auto_accept": relationship_auto_accept,
+        },
+    )
 
 
 def require_active_clone(session_db: Session, user_id: str) -> CloneAgent:
@@ -107,6 +189,10 @@ def create_negotiation_approval(
             "reason": reason,
             "proposed_action": "ACCEPT",
             "payload": payload,
+            # E2: 解決時にどちらのクローンが送信者になるかを明示する。responder 決め打ちを
+            # 外すため（on_approval_resolved 参照）。無ければ従来どおり responder_clone_id
+            # にフォールバックする。
+            "decider_clone_id": decider.id,
         },
     )
     negotiation.status = NegotiationStatus.WAITING_APPROVAL.value

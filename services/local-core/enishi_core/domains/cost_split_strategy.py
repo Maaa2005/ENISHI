@@ -108,6 +108,16 @@ def _initiator_action(
     if standing >= x_i:
         return StrategyAction(kind="accept", amount=standing, reason_codes=[])
 
+    # E1: 自分は既に下限 L まで譲歩済み（x_i == L）だが、相手の提示はまだ L に届いていない。
+    # これ以上譲れる余地がない。「相手の提示が自分の下限に届かない」は価値判断であり、
+    # reject（エージェントが自動で打ち切る）ではなく escalate（所有者に返す）が
+    # ENISHI の思想として正しい（responder 側の reject は max_negotiable_amount 超過という
+    # 明示的なポリシー上限があるので別扱い）。
+    if x_i <= floor and standing < floor:
+        return StrategyAction(
+            kind="escalate", amount=None, reason_codes=["cost_share_below_reservation"]
+        )
+
     candidate = max(floor, x_i - (x_i - standing) * concession_ratio)
     candidate = round(candidate, 2)
 

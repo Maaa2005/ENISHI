@@ -59,6 +59,16 @@ class DecisionDomain(Protocol):
         """この交渉を進行させる。"""
         ...
 
+    def evaluate_decision(self, **kwargs: Any) -> Any:
+        """交渉の終端判断を評価する（対応しないドメインは `NotImplementedError`）。
+
+        E3-a: ローカル/リモートの両ドライバが同じ判断コードへレジストリ経由で
+        たどり着けるようにするための継ぎ目。全ドメインが判断評価を持つわけではない
+        （`cost.split` は `next_action` という別形の純粋関数を使う）ため、
+        戻り値は `Any`（実際は各ドメインが定義する評価結果の型）。
+        """
+        ...
+
 
 class BaseDecisionDomain:
     """`DecisionDomain` の共通デフォルトを持つ基底クラス。"""
@@ -81,4 +91,7 @@ class BaseDecisionDomain:
         raise NotImplementedError
 
     def start(self, session_db: Session, request: DomainRequest) -> NegotiationSession:
+        raise NotImplementedError
+
+    def evaluate_decision(self, **kwargs: Any) -> Any:
         raise NotImplementedError

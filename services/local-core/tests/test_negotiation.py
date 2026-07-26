@@ -229,6 +229,49 @@ def test_list_negotiations_newest_first(
     assert len(limited.json()) == 1
 
 
+def test_negotiation_waits_for_approval_when_receiver_confidence_below_threshold(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """新規5. E3-b: ローカルの日程調整も、共通スロットが見つかっても所有者の権限ガード
+    （delegation/confidence/relationship）を通す。confidence が閾値未満なら auto-agree せず
+    waiting_approval になる（従来は receiver の権限を無視して即 ACCEPT していた）。
+    """
+    from enishi_core.database import get_session
+    from enishi_core.domains.common import CONFIDENCE_THRESHOLD
+    from enishi_core.models import CloneAgent
+
+    a = _create_user(client, auth_headers, "中村")
+    b = _create_user(client, auth_headers, "田中")
+    a_busy = [{"start": "2026-07-13T13:00", "end": "2026-07-13T14:00"}]
+    b_busy = [{"start": "2026-07-13T17:00", "end": "2026-07-13T18:00"}]
+    _add_busy(client, auth_headers, a, a_busy)
+    _add_busy(client, auth_headers, b, b_busy)
+    _activate_clone(client, auth_headers, a)
+    clone_b_id = _activate_clone(client, auth_headers, b)
+
+    # E3-c により activate 直後は confidence >= CONFIDENCE_THRESHOLD になっている。
+    # ここでは記憶削除等で活性化後に confidence が下がったケース（enishi.md §17）を模す。
+    session = next(get_session())
+    try:
+        clone_b = session.get(CloneAgent, clone_b_id)
+        assert clone_b is not None
+        assert clone_b.confidence_score >= CONFIDENCE_THRESHOLD
+        clone_b.confidence_score = 0.1
+        session.commit()
+    finally:
+        session.close()
+
+    result = _negotiate(client, auth_headers, a, b)
+    assert result["status"] == "waiting_approval"
+    assert result["pending_approval_id"] is not None
+
+    approvals = client.get(f"/v1/approvals?user_id={b}", headers=auth_headers).json()
+    matching = [ap for ap in approvals if ap["id"] == result["pending_approval_id"]]
+    assert len(matching) == 1
+    assert matching[0]["payload"]["reason"] == "clone_confidence_below_threshold"
+    assert matching[0]["payload"]["decider_clone_id"] == clone_b_id
+
+
 def test_get_unknown_negotiation_returns_404(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:

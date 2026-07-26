@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from enishi_core.config import get_settings
+from enishi_core.domains import get_domain
 from enishi_core.errors import EnishiError
 from enishi_core.models import (
     Agreement,
@@ -35,7 +36,6 @@ from enishi_core.security.replay import check_and_record
 from enishi_core.services import protocol_state
 from enishi_core.services.approvals import create_approval
 from enishi_core.services.audit import log_event
-from enishi_core.services.decision_evaluator import evaluate_meeting_schedule
 from enishi_core.services.memories import exportable_memories
 from enishi_core.services.peers import filter_memories_for_peer, get_disclosure_policy
 from enishi_core.services.policies import delegation_enabled
@@ -446,7 +446,10 @@ def _record_decision(
     peer_personal_agent_id: str,
 ) -> NegotiationDecision:
     user = session_db.get(User, clone.user_id)
-    evaluation = evaluate_meeting_schedule(
+    # E3-a: 判断コードの二重化（ローカル run_negotiation とリモートで別々に評価していた）を
+    # 構造的に解消するため、`evaluate_meeting_schedule` を直接 import せず、レジストリ経由で
+    # ドメインの評価関数を呼ぶ。
+    evaluation = get_domain(INTENT).evaluate_decision(
         clone=clone,
         delegation_enabled=delegation_enabled(
             session_db, clone.user_id, "schedule_negotiation", default=True
