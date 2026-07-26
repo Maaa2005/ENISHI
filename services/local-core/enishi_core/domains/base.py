@@ -102,13 +102,37 @@ class DecisionDomain(Protocol):
         ...
 
     def decide_remote_reply(
-        self, own_position: dict[str, Any], received_public: dict[str, Any]
+        self,
+        clone: CloneAgent,
+        own_position: dict[str, Any],
+        received_public: dict[str, Any],
+        *,
+        role: str,
+        round_number: int,
+        peer_personal_agent_id: str,
+        delegation_enabled: bool,
+        high_value_approval_required: bool,
+        own_last_delta: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        """相手の公開提示（受信envelopeのdelta）に対する次の一手を決める（Phase F1）。
+        """相手の公開提示（受信envelopeのdelta）に対する次の一手を決める（Phase F1, F5-a）。
 
         `own_position` は `derive_own_position` の戻り値。相手の `CloneAgent` は
-        受け取らない（Phase D の原則）。戻り値はドライバが `evaluate_decision` へ渡す
-        入力と、応答（ACCEPT/COUNTER）の材料をまとめたもの。
+        受け取らない（Phase D の原則）。`Session` を要する判定
+        （`delegation_enabled` / `high_value_approval_required` 等）はドライバが
+        先に評価し、bool だけをここへ渡す。
+
+        戻り値は次のキーを持つ dict（ドメインをまたいで共通の契約）:
+        - `outcome`: `"auto_accept" | "counter" | "approval_required" | "reject"`
+          （`NegotiationDecision.outcome` と同じ語彙）
+        - `reason_codes` / `evidence` / `confidence` / `policy_version`:
+          `NegotiationDecision` へそのまま保存する評価根拠
+        - `reply_delta`: `outcome` が `auto_accept`（ACCEPT）/ `counter`（COUNTER）/
+          `reject`（REJECT）のときにそのまま wire delta として送る辞書
+        - `agreement_value`: `outcome == "auto_accept"` のときに
+          `remote_agreement_payload()` へ渡す値（それ以外は無視してよい）
+        - `approval_raw`: `outcome == "approval_required"` のときに
+          `approval_context()` へ渡す生データ
+        - `proposed_action`: 承認画面のデフォルト操作（`"ACCEPT" | "COUNTER"`）
         """
         ...
 
@@ -126,6 +150,26 @@ class DecisionDomain(Protocol):
         - `proposal` — その承認で人間が是非を判断する対象。
         - `public_context` — 承認画面に出す**公開可能な**補助情報。
           留保価格・効用パラメータ・記憶の生データのような私的情報を絶対に入れないこと。
+        """
+        ...
+
+    def approval_reply(
+        self,
+        *,
+        approved: bool,
+        target_status: str,
+        proposal: dict[str, Any],
+        public_context: dict[str, Any],
+        override: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """人間による承認解決の結果から、返信のwireメッセージを組み立てる（Phase F5-a）。
+
+        `proposal` / `public_context` は `approval_context()` が組み立てたもの
+        （読み側の後方互換で旧キーからの復元を含みうる）。`override` は人間が候補を
+        上書きした場合の値（`resolve_remote_approval` の `proposal_override`）。
+
+        戻り値: `{"message_type": "ACCEPT"|"COUNTER"|"REJECT", "delta": {...},
+        "agreement_value": <remote_agreement_payload()へ渡す値 | None>}`。
         """
         ...
 
@@ -173,7 +217,17 @@ class BaseDecisionDomain:
         raise NotImplementedError
 
     def decide_remote_reply(
-        self, own_position: dict[str, Any], received_public: dict[str, Any]
+        self,
+        clone: CloneAgent,
+        own_position: dict[str, Any],
+        received_public: dict[str, Any],
+        *,
+        role: str,
+        round_number: int,
+        peer_personal_agent_id: str,
+        delegation_enabled: bool,
+        high_value_approval_required: bool,
+        own_last_delta: dict[str, Any] | None,
     ) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -181,4 +235,15 @@ class BaseDecisionDomain:
         raise NotImplementedError
 
     def approval_context(self, raw: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def approval_reply(
+        self,
+        *,
+        approved: bool,
+        target_status: str,
+        proposal: dict[str, Any],
+        public_context: dict[str, Any],
+        override: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         raise NotImplementedError

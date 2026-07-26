@@ -38,7 +38,7 @@ from enishi_core.security.replay import check_and_record
 from enishi_core.services import protocol_state
 from enishi_core.services.approvals import create_approval
 from enishi_core.services.audit import log_event
-from enishi_core.services.policies import delegation_enabled
+from enishi_core.services.policies import approval_required, delegation_enabled
 from enishi_core.services.public_reasons import to_public_reason
 from enishi_core.services.relay_client import RelayTransport
 
@@ -59,9 +59,22 @@ def _require_trusted_peer(session_db: Session, agent_id: str) -> PeerAgent:
 
 
 def _require_peer_capability(peer: PeerAgent, intent: str) -> None:
-    """v2名刺の能力宣言がある場合だけ厳格検証し、v1ピアは互換動作させる。"""
+    """v2名刺の能力宣言がある場合だけ厳格検証し、v1ピアは互換動作させる。
+
+    v1ピア（`capabilities` が空）は AUN プロトコルの能力宣言以前の相手であり、
+    従来どおり `meeting.schedule` のみ許可する（F5: `cost.split` が
+    `supports_remote=True` になったことで、この分岐を通る intent が増えたため
+    明示的にガードする）。
+    """
     capabilities = peer.capabilities or {}
     if not capabilities:
+        if intent != INTENT_MEETING_SCHEDULE:
+            raise EnishiError(
+                code="PEER_CAPABILITY_MISMATCH",
+                message="能力宣言のないピアとは meeting.schedule 以外の遠隔交渉ができません。",
+                status_code=409,
+                details={"intent": intent},
+            )
         return
     intents = capabilities.get("supported_intents", [])
     protocols = capabilities.get("protocol_versions", [])
@@ -193,14 +206,13 @@ def start_remote_negotiation(
     _validate_remote_payload(intent, user_id, payload)
     peer = _require_trusted_peer(session_db, peer_agent_id)
     _require_peer_capability(peer, intent)
-    if not delegation_enabled(
-        session_db, user_id, "schedule_negotiation", default=True
-    ):
+    delegation_key = domain.delegation_key or "schedule_negotiation"
+    if not delegation_enabled(session_db, user_id, delegation_key, default=True):
         raise EnishiError(
             code="NEGOTIATION_PERMISSION_DENIED",
-            message="日程調整は本人代理AIへ委任されていません。",
+            message="この交渉は本人代理AIへ委任されていません。",
             status_code=403,
-            details={"operation": "schedule_negotiation"},
+            details={"operation": delegation_key},
         )
     from enishi_core.services.agent_requests import (
         ensure_device_node,
@@ -443,41 +455,51 @@ def _create_remote_agreement(
     return agreement
 
 
-def _record_decision(
+def _record_remote_decision(
     session_db: Session,
     negotiation: NegotiationSession,
     clone: CloneAgent,
-    *,
-    common_slot_count: int,
-    selected_slot: dict[str, Any] | None,
-    peer_personal_agent_id: str,
+    reply: dict[str, Any],
 ) -> NegotiationDecision:
-    user = session_db.get(User, clone.user_id)
-    # E3-a: 判断コードの二重化（ローカル run_negotiation とリモートで別々に評価していた）を
-    # 構造的に解消するため、`evaluate_meeting_schedule` を直接 import せず、レジストリ経由で
-    # ドメインの評価関数を呼ぶ。
-    evaluation = get_domain(negotiation.intent).evaluate_decision(
-        clone=clone,
-        delegation_enabled=delegation_enabled(
-            session_db, clone.user_id, "schedule_negotiation", default=True
-        ),
-        common_slot_count=common_slot_count,
-        selected_slot=selected_slot,
-        peer_personal_agent_id=peer_personal_agent_id,
-        timezone=user.timezone if user else "UTC",
-    )
+    """`decide_remote_reply` の戻り値から `NegotiationDecision` を保存する（Phase F5-a）。
+
+    E3-a: 判断コードの二重化（ローカル run_negotiation とリモートで別々に評価していた）を
+    構造的に解消するため、判断そのものはドメイン（`decide_remote_reply`）が行い、
+    ここは結果を保存するだけにする。
+    """
     decision = NegotiationDecision(
         session_id=negotiation.id,
         clone_id=clone.id,
-        policy_version=evaluation.policy_version,
-        outcome=evaluation.outcome,
-        reason_codes=evaluation.reason_codes,
-        evidence=evaluation.evidence,
-        confidence=evaluation.confidence,
+        policy_version=reply["policy_version"],
+        outcome=reply["outcome"],
+        reason_codes=reply["reason_codes"],
+        evidence=reply["evidence"],
+        confidence=reply["confidence"],
     )
     session_db.add(decision)
     session_db.flush()
     return decision
+
+
+def _own_last_offer_delta(
+    session_db: Session, session_id: str, peer_sender: str
+) -> dict[str, Any] | None:
+    """この交渉でこちら側が最後に送った PROPOSE/COUNTER の delta（あれば）。
+
+    ドメイン非依存: 送信者がこのメッセージの送り主（`peer_sender`）でない、
+    つまり「自分が送った」もののうち最新のものを返す。`cost.split` の
+    `my_last_offer`（自分の直前の提示額）を組み立てるために使う。
+    """
+    message = session_db.scalars(
+        select(NegotiationMessage)
+        .where(
+            NegotiationMessage.session_id == session_id,
+            NegotiationMessage.message_type.in_(("PROPOSE", "COUNTER")),
+            NegotiationMessage.sender_agent_id != peer_sender,
+        )
+        .order_by(NegotiationMessage.sequence.desc())
+    ).first()
+    return dict(message.delta) if message is not None else None
 
 
 def _request_human_decision(
@@ -486,18 +508,17 @@ def _request_human_decision(
     clone: CloneAgent,
     decision: NegotiationDecision,
     *,
-    selected_slot: dict[str, Any] | None,
-    candidate_slots: list[dict[str, Any]],
+    approval_raw: dict[str, Any],
+    proposed_action: str,
     peer_node_id: str,
     peer_personal_agent_id: str,
 ) -> Approval:
     # Phase F2: 承認payloadの脱ドメイン化。ドメイン非依存の `proposal` / `public_context` を
-    # ドメインに組み立てさせつつ、旧キー（selected_slot/candidate_slots）も従来どおり出力する
-    # （書き側の後方互換。`apps/desktop` の ApprovalsPage.tsx / AgreementsPage.tsx はこの2キーを
-    # 直接読んでいるため必須）。
-    context = get_domain(negotiation.intent).approval_context(
-        {"selected_slot": selected_slot, "candidate_slots": candidate_slots}
-    )
+    # ドメインに組み立てさせる。`selected_slot` / `candidate_slots` の後方互換キーは
+    # `approval_raw` に含まれていればそのまま引き継ぐ（meeting のみが持つ。書き側の後方互換。
+    # `apps/desktop` の ApprovalsPage.tsx / AgreementsPage.tsx が
+    # この2キーを直接読んでいるため必須）。
+    context = get_domain(negotiation.intent).approval_context(approval_raw)
     approval = create_approval(
         session_db,
         user_id=clone.user_id,
@@ -508,13 +529,14 @@ def _request_human_decision(
             "session_id": negotiation.id,
             "intent": negotiation.intent,
             "remote": True,
-            "proposed_action": "ACCEPT" if selected_slot else "COUNTER",
+            "proposed_action": proposed_action,
             "proposal": context["proposal"],
             "public_context": context["public_context"],
             # 後方互換（書き側）: この変更以前のクライアント・UIがそのまま読めるよう、
-            # ドメイン固有の旧キーも並行して出力し続ける。
-            "selected_slot": selected_slot or {},
-            "candidate_slots": candidate_slots,
+            # meeting.schedule のドメイン固有の旧キーも並行して出力し続ける
+            # （cost.split 等の他ドメインには存在しないため空のまま出る）。
+            "selected_slot": approval_raw.get("selected_slot") or {},
+            "candidate_slots": approval_raw.get("candidate_slots") or [],
             "reason_codes": list(decision.reason_codes),
             "decision_confidence": decision.confidence,
             "peer_node_id": peer_node_id,
@@ -621,42 +643,33 @@ def resolve_remote_approval(
         )
 
     approved = target_status == ApprovalStatus.APPROVED.value
-    # Phase F2 読み側後方互換: この変更以前に作られた承認レコードは `proposal` を持たず、
-    # `selected_slot` しか持たない（Phase E の decider_clone_id と同じフォールバックの形）。
+    # Phase F2 読み側後方互換: この変更以前に作られた承認レコードは `proposal` /
+    # `public_context` を持たず、`selected_slot` / `candidate_slots` しか持たない
+    # （Phase E の decider_clone_id と同じフォールバックの形）。
     proposal = approval.payload.get("proposal")
-    if isinstance(proposal, dict) and "selected_slot" in proposal:
-        selected_slot = dict(proposal.get("selected_slot") or {})
-    else:
-        selected_slot = dict(approval.payload.get("selected_slot", {}))
-    candidate_slots = [
-        dict(slot) for slot in approval.payload.get("candidate_slots", [])
-        if isinstance(slot, dict)
-    ]
-    proposed_action = str(approval.payload.get("proposed_action", "ACCEPT"))
-    if approved and proposal_override is not None:
-        override = dict(proposal_override)
-        if override not in candidate_slots:
-            raise EnishiError(
-                code="INVALID_APPROVAL_SELECTION",
-                message="選択した候補は、この承認に含まれていません。",
-                status_code=422,
-                details={"approval_id": approval.id},
-            )
-        proposed_action = "ACCEPT" if override == selected_slot else "COUNTER"
-        selected_slot = override
-    message_type = proposed_action if approved else "REJECT"
-    delta: dict[str, Any]
-    if approved and message_type == "ACCEPT":
-        delta = {"selected_slot": selected_slot}
-    elif approved and message_type == "COUNTER":
-        counter_slots = [selected_slot] if selected_slot else candidate_slots[:_OFFER_SIZE]
-        delta = {"candidate_slots": counter_slots}
-    else:
-        delta = {
-            "code": "HUMAN_REJECTED"
-            if target_status == "rejected"
-            else "APPROVAL_EXPIRED"
-        }
+    if not isinstance(proposal, dict) or not proposal:
+        proposal = {"selected_slot": approval.payload.get("selected_slot", {})}
+    public_context = approval.payload.get("public_context")
+    if not isinstance(public_context, dict) or not public_context:
+        public_context = {"candidate_slots": approval.payload.get("candidate_slots", [])}
+
+    try:
+        reply = get_domain(negotiation.intent).approval_reply(
+            approved=approved,
+            target_status=target_status,
+            proposal=proposal,
+            public_context=public_context,
+            override=proposal_override,
+        )
+    except EnishiError as exc:
+        raise EnishiError(
+            code=exc.code,
+            message=exc.message,
+            status_code=exc.status_code,
+            details={**exc.details, "approval_id": approval.id},
+        ) from exc
+    message_type = str(reply["message_type"])
+    delta: dict[str, Any] = dict(reply["delta"])
     public_payload: dict[str, Any] = {}
     if message_type == "COUNTER":
         public_payload = {
@@ -704,13 +717,12 @@ def resolve_remote_approval(
     approval.status = target_status
     approval.resolved_at = utc_now()
     if approved and message_type == "ACCEPT":
-        negotiation.status = NegotiationStatus.AGREED.value
-        negotiation.result = {"selected_slot": selected_slot, "approved_by_human": True}
-        _create_remote_agreement(
-            session_db,
-            negotiation,
-            get_domain(negotiation.intent).remote_agreement_payload(selected_slot),
+        agreed_payload = get_domain(negotiation.intent).remote_agreement_payload(
+            reply["agreement_value"]
         )
+        negotiation.status = NegotiationStatus.AGREED.value
+        negotiation.result = {**agreed_payload, "approved_by_human": True}
+        _create_remote_agreement(session_db, negotiation, agreed_payload)
     elif approved:
         negotiation.status = NegotiationStatus.OPEN.value
         negotiation.result = {"counter_approved_by_human": True}
@@ -821,50 +833,74 @@ def _handle_envelope(
         own_position = domain.derive_own_position(
             session_db, clone, request_payload, sender_node
         )
-        reply = domain.decide_remote_reply(own_position, envelope.get("delta", {}))
-        common_slot_count = int(reply["common_slot_count"])
-        selected_slot = reply["selected_slot"]
-        counter_offer = reply["counter_offer"]
+        role = "initiator" if negotiation.initiator_clone_id == clone.id else "responder"
         rounds = _counter_rounds(session_db, session_id) + 1
         sender_personal_id = personal.id if personal else ""
-        decision = _record_decision(
+        delegation_ok = delegation_enabled(
             session_db,
-            negotiation,
-            clone,
-            common_slot_count=common_slot_count,
-            selected_slot=selected_slot,
-            peer_personal_agent_id=sender,
+            clone.user_id,
+            domain.delegation_key or "schedule_negotiation",
+            default=True,
         )
+        high_value_approval_required = approval_required(session_db, clone.user_id, "high_value")
+        own_last_delta = _own_last_offer_delta(session_db, session_id, sender)
+        reply = domain.decide_remote_reply(
+            clone,
+            own_position,
+            envelope.get("delta", {}),
+            role=role,
+            round_number=rounds,
+            peer_personal_agent_id=sender,
+            delegation_enabled=delegation_ok,
+            high_value_approval_required=high_value_approval_required,
+            own_last_delta=own_last_delta,
+        )
+        decision = _record_remote_decision(session_db, negotiation, clone, reply)
         if decision.outcome == "approval_required":
             _request_human_decision(
                 session_db,
                 negotiation,
                 clone,
                 decision,
-                selected_slot=selected_slot,
-                candidate_slots=counter_offer,
+                approval_raw=reply["approval_raw"],
+                proposed_action=reply["proposed_action"],
                 peer_node_id=sender_node,
                 peer_personal_agent_id=sender,
             )
             session_db.commit()
             return {"message_id": message_id, "action": "approval_required"}
-        if common_slot_count > 0:
-            selected = selected_slot
+        if decision.outcome == "auto_accept":
             _send_reply(
                 session_db, relay, negotiation, sender_personal_id, sender, sender_node,
                 "ACCEPT", sequence + 1,
-                {"selected_slot": selected},
+                reply["reply_delta"],
             )
+            agreed_payload = domain.remote_agreement_payload(reply["agreement_value"])
             negotiation.status = NegotiationStatus.AGREED.value
-            negotiation.result = {"selected_slot": selected, "rounds": rounds}
-            _create_remote_agreement(
-                session_db, negotiation, domain.remote_agreement_payload(selected)
+            negotiation.result = {**agreed_payload, "rounds": rounds}
+            _create_remote_agreement(session_db, negotiation, agreed_payload)
+        elif decision.outcome == "reject":
+            _send_reply(
+                session_db, relay, negotiation, sender_personal_id, sender, sender_node,
+                "REJECT", sequence + 1,
+                reply["reply_delta"],
+                {"public_reason": to_public_reason(decision.reason_codes)},
             )
+            negotiation.status = NegotiationStatus.FAILED.value
+            negotiation.result = {
+                "code": reply["reply_delta"].get("code", "REJECTED"),
+                "rounds": rounds,
+            }
         elif rounds < protocol_state.MAX_COUNTER_ROUNDS:
+            # outcome == "counter": ラウンド上限内なら通常どおりCOUNTERを返す。
+            # 上限超過時のERRORは、ドメインが自己終端しない場合の汎用フォールバック
+            # （プロトコル層の `protocol_state.MAX_COUNTER_ROUNDS` に基づく。
+            # meetingはこの経路で終端する。cost.splitは`decide_remote_reply`が
+            # 最終ラウンドで自ら"approval_required"へ倒すため通常ここへは来ない）。
             _send_reply(
                 session_db, relay, negotiation, sender_personal_id, sender, sender_node,
                 "COUNTER", sequence + 1,
-                {"candidate_slots": counter_offer},
+                reply["reply_delta"],
                 {"public_reason": to_public_reason(decision.reason_codes)},
             )
         else:

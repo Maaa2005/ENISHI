@@ -163,7 +163,7 @@ class MeetingScheduleDomain(BaseDecisionDomain):
             busy,
             timezone,
         )
-        return {"candidates": candidates}
+        return {"candidates": candidates, "timezone": timezone}
 
     def build_remote_propose_delta(self, own_position: dict[str, Any]) -> dict[str, Any]:
         """初回PROPOSEのwire delta（Phase F5-a）。
@@ -175,16 +175,55 @@ class MeetingScheduleDomain(BaseDecisionDomain):
         return {"candidate_slots": candidates[:_OFFER_SIZE]}
 
     def decide_remote_reply(
-        self, own_position: dict[str, Any], received_public: dict[str, Any]
+        self,
+        clone: CloneAgent,
+        own_position: dict[str, Any],
+        received_public: dict[str, Any],
+        *,
+        role: str,
+        round_number: int,
+        peer_personal_agent_id: str,
+        delegation_enabled: bool,
+        high_value_approval_required: bool,
+        own_last_delta: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        """共通スロットの交差（Phase F1: `remote_negotiation._handle_envelope` から移設）。"""
+        """共通スロットの交差＋判断（Phase F1/F5-a: `remote_negotiation._handle_envelope`
+        と `_record_decision` から移設）。"""
         own = own_position.get("candidates", [])
+        timezone = own_position.get("timezone", "UTC")
         received = [dict(s) for s in received_public.get("candidate_slots", [])]
         common = intersect_slots(own, received)
+        selected_slot = common[0] if common else None
+        counter_offer = own[:_OFFER_SIZE]
+
+        evaluation = evaluate_meeting_schedule(
+            clone=clone,
+            delegation_enabled=delegation_enabled,
+            common_slot_count=len(common),
+            selected_slot=selected_slot,
+            peer_personal_agent_id=peer_personal_agent_id,
+            timezone=timezone,
+        )
+
+        if evaluation.outcome == "auto_accept":
+            reply_delta: dict[str, Any] = {"selected_slot": selected_slot}
+            agreement_value: dict[str, Any] | None = selected_slot
+            proposed_action = "ACCEPT"
+        else:
+            reply_delta = {"candidate_slots": counter_offer}
+            agreement_value = None
+            proposed_action = "ACCEPT" if selected_slot else "COUNTER"
+
         return {
-            "common_slot_count": len(common),
-            "selected_slot": common[0] if common else None,
-            "counter_offer": own[:_OFFER_SIZE],
+            "outcome": evaluation.outcome,
+            "reason_codes": evaluation.reason_codes,
+            "evidence": evaluation.evidence,
+            "confidence": evaluation.confidence,
+            "policy_version": evaluation.policy_version,
+            "reply_delta": reply_delta,
+            "agreement_value": agreement_value,
+            "approval_raw": {"selected_slot": selected_slot, "candidate_slots": counter_offer},
+            "proposed_action": proposed_action,
         }
 
     def remote_agreement_payload(self, agreed: dict[str, Any]) -> dict[str, Any]:
@@ -202,6 +241,49 @@ class MeetingScheduleDomain(BaseDecisionDomain):
         return {
             "proposal": {"selected_slot": dict(selected_slot)} if selected_slot else {},
             "public_context": {"candidate_slots": candidate_slots},
+        }
+
+    def approval_reply(
+        self,
+        *,
+        approved: bool,
+        target_status: str,
+        proposal: dict[str, Any],
+        public_context: dict[str, Any],
+        override: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """承認解決の結果からwireメッセージを組み立てる（Phase F5-a:
+        `remote_negotiation.resolve_remote_approval` から移設）。"""
+        selected_slot = dict(proposal.get("selected_slot") or {})
+        candidate_slots = list(public_context.get("candidate_slots") or [])
+        proposed_action = "ACCEPT" if selected_slot else "COUNTER"
+
+        if not approved:
+            code = "HUMAN_REJECTED" if target_status == "rejected" else "APPROVAL_EXPIRED"
+            return {"message_type": "REJECT", "delta": {"code": code}, "agreement_value": None}
+
+        if override is not None:
+            overridden = dict(override)
+            if overridden not in candidate_slots:
+                raise EnishiError(
+                    code="INVALID_APPROVAL_SELECTION",
+                    message="選択した候補は、この承認に含まれていません。",
+                    status_code=422,
+                )
+            proposed_action = "ACCEPT" if overridden == selected_slot else "COUNTER"
+            selected_slot = overridden
+
+        if proposed_action == "ACCEPT":
+            return {
+                "message_type": "ACCEPT",
+                "delta": {"selected_slot": selected_slot},
+                "agreement_value": selected_slot,
+            }
+        counter_slots = [selected_slot] if selected_slot else candidate_slots[:_OFFER_SIZE]
+        return {
+            "message_type": "COUNTER",
+            "delta": {"candidate_slots": counter_slots},
+            "agreement_value": None,
         }
 
 
