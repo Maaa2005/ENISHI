@@ -234,7 +234,7 @@ def start_remote_negotiation(
         {**payload, "timezone": user.timezone if user else "UTC"}
     )
     own_position = domain.derive_own_position(session_db, clone, request_payload, peer_agent_id)
-    candidates = own_position["candidates"][:_OFFER_SIZE]
+    propose_delta = domain.build_remote_propose_delta(own_position)
 
     negotiation = NegotiationSession(
         initiator_clone_id=clone.id,
@@ -273,7 +273,7 @@ def start_remote_negotiation(
         session_version=negotiation.session_version,
         sequence=2,
         payload={},
-        delta={"candidate_slots": candidates},
+        delta=propose_delta,
         requires_human_approval=False,
         private_key=private_key,
         **transport_ids,

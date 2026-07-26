@@ -92,6 +92,15 @@ class DecisionDomain(Protocol):
         """
         ...
 
+    def build_remote_propose_delta(self, own_position: dict[str, Any]) -> dict[str, Any]:
+        """初回PROPOSEのwire delta（Phase F5, F5-a）。
+
+        `own_position` は `derive_own_position` の戻り値。スライス（`meeting` の
+        `_OFFER_SIZE` 等）もここへ入れる。ドライバは `own_position` の中身を
+        添字アクセスしない（ドメイン非依存を保つため）。
+        """
+        ...
+
     def decide_remote_reply(
         self, own_position: dict[str, Any], received_public: dict[str, Any]
     ) -> dict[str, Any]:
@@ -158,6 +167,9 @@ class BaseDecisionDomain:
         request_payload: dict[str, Any],
         peer_agent_id: str,
     ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def build_remote_propose_delta(self, own_position: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
     def decide_remote_reply(

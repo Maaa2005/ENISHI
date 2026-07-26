@@ -165,6 +165,15 @@ class MeetingScheduleDomain(BaseDecisionDomain):
         )
         return {"candidates": candidates}
 
+    def build_remote_propose_delta(self, own_position: dict[str, Any]) -> dict[str, Any]:
+        """初回PROPOSEのwire delta（Phase F5-a）。
+
+        候補の件数上限（`_OFFER_SIZE`）による絞り込みも meeting 固有なのでここで行う。
+        ドライバは `own_position` の中身を添字アクセスしない。
+        """
+        candidates = list(own_position.get("candidates", []))
+        return {"candidate_slots": candidates[:_OFFER_SIZE]}
+
     def decide_remote_reply(
         self, own_position: dict[str, Any], received_public: dict[str, Any]
     ) -> dict[str, Any]:
