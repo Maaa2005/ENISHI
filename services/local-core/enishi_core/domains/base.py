@@ -107,6 +107,19 @@ class DecisionDomain(Protocol):
         """遠隔交渉が合意に達したときの `Agreement.agreed_payload` を組み立てる（Phase F1）。"""
         ...
 
+    def approval_context(self, raw: dict[str, Any]) -> dict[str, Any]:
+        """人間承認payloadの `proposal` / `public_context` を組み立てる（Phase F2）。
+
+        `raw` はドライバ（`services/remote_negotiation.py`）が持つドメイン固有の生の
+        意思決定材料（meeting なら `selected_slot` / `candidate_slots`）。戻り値は
+        `{"proposal": ..., "public_context": ...}` の2キーを持つ辞書。
+
+        - `proposal` — その承認で人間が是非を判断する対象。
+        - `public_context` — 承認画面に出す**公開可能な**補助情報。
+          留保価格・効用パラメータ・記憶の生データのような私的情報を絶対に入れないこと。
+        """
+        ...
+
 
 class BaseDecisionDomain:
     """`DecisionDomain` の共通デフォルトを持つ基底クラス。"""
@@ -153,4 +166,7 @@ class BaseDecisionDomain:
         raise NotImplementedError
 
     def remote_agreement_payload(self, agreed: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def approval_context(self, raw: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError

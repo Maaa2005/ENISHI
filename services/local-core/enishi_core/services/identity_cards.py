@@ -14,13 +14,23 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from sqlalchemy.orm import Session
 
 from enishi_core.config import get_settings
+from enishi_core.domains import get_domain, registered_intents
 from enishi_core.errors import EnishiError
 from enishi_core.models import User
 from enishi_core.security.keys import ensure_node_keypair
 from enishi_core.services import agent_requests, peers
 
-_SUPPORTED_INTENTS = ["meeting.schedule", "task.request"]
 _PROTOCOL_VERSIONS = ["aun/0.2", "aun/0.1"]
+
+
+def _supported_intents() -> list[str]:
+    """`supports_remote=True` のドメインだけを名刺で宣言する（Phase F3）。
+
+    宣言は「相手から送られてきても処理できる」という約束である。遠隔ドライバを
+    実装していないドメイン（例: 現時点の `task.request` / `cost.split`）を宣言すると、
+    相手が実際に送ってきたときに壊れる。
+    """
+    return [intent for intent in registered_intents() if get_domain(intent).supports_remote]
 
 
 def _unsigned(card: dict[str, Any]) -> bytes:
@@ -45,7 +55,7 @@ def create_card(session: Session, user_id: str) -> dict[str, Any]:
         "profile": {"display_name": user.display_name},
         "capabilities": {
             "timezone": user.timezone,
-            "supported_intents": _SUPPORTED_INTENTS,
+            "supported_intents": _supported_intents(),
             "protocol_versions": _PROTOCOL_VERSIONS,
         },
         "relay_endpoint": get_settings().relay_url,

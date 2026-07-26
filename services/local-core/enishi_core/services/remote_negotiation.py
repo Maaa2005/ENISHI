@@ -5,6 +5,7 @@
 除外理由は送らない（§17 v2）。監査ログにも本文を残さない。
 """
 
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
@@ -130,19 +131,68 @@ def _enqueue_envelope(
     return outbox
 
 
+@dataclass
+class _RemoteNegotiationRequest:
+    """`DecisionDomain.validate_request()` へ渡すための `NegotiationRequestLike` 実装。
+
+    `agent_requests._InterpretedNegotiationRequest` と同じ役割。Protocolが属性への
+    代入可能性まで要求するためfrozenにはしない。
+    """
+
+    intent: str
+    initiator_user_id: str
+    responder_user_id: str
+    payload: dict[str, Any]
+
+
+def _validate_remote_payload(intent: str, user_id: str, payload: dict[str, Any]) -> None:
+    """ワイヤに載る前にドメイン検証を通す。不正入力はドメインが422を送出する。"""
+    get_domain(intent).validate_request(
+        _RemoteNegotiationRequest(
+            intent=intent,
+            initiator_user_id=user_id,
+            responder_user_id="",
+            payload=payload,
+        )
+    )
+
+
 def start_remote_negotiation(
     session_db: Session,
     relay: RelayTransport,
     user_id: str,
     peer_agent_id: str,
-    topic: str,
-    duration_minutes: int,
-    date_range: dict[str, str],
-    preferred_time_ranges: list[dict[str, str]],
+    topic: str | None = None,
+    duration_minutes: int | None = None,
+    date_range: dict[str, str] | None = None,
+    preferred_time_ranges: list[dict[str, str]] | None = None,
+    *,
+    intent: str = INTENT_MEETING_SCHEDULE,
+    payload: dict[str, Any] | None = None,
 ) -> NegotiationSession:
-    """Relay経由で相手ノードへREQUESTとPROPOSEを送る（送信側）。"""
+    """Relay経由で相手ノードへREQUESTとPROPOSEを送る（送信側）。
+
+    Phase F4-b: `intent` + `payload` を受け取り、`get_domain(intent)` 経由でPhase F1の
+    フック（`build_remote_request_payload` / `derive_own_position`）を呼ぶ形へ一般化した。
+    `topic` / `duration_minutes` / `date_range` / `preferred_time_ranges` を直接渡す
+    旧来の呼び出し形式は、ゴールデンテスト（`tests/test_remote_domains.py`）や
+    `tests/test_negotiation_phase6_policy.py` が直接使用しているため、後方互換として残す。
+    `payload` が指定されなければ、これら旧来の引数から組み立てる。
+    """
+    if payload is None:
+        payload = {
+            "topic": topic,
+            "duration_minutes": duration_minutes,
+            "date_range": date_range,
+            "preferred_time_ranges": preferred_time_ranges,
+        }
+    domain = get_domain(intent)
+    # payloadが不透明なdictになったことで、旧`RemoteNegotiationCreate`の型（DateRange/TimeRange）が
+    # 担っていたスキーマ層の検証が失われた。相手ノードへ送る経路なので、ワイヤに載る前に
+    # ローカル経路と同じドメイン検証を通し、不正入力は決定的に422で拒否する。
+    _validate_remote_payload(intent, user_id, payload)
     peer = _require_trusted_peer(session_db, peer_agent_id)
-    _require_peer_capability(peer, INTENT_MEETING_SCHEDULE)
+    _require_peer_capability(peer, intent)
     if not delegation_enabled(
         session_db, user_id, "schedule_negotiation", default=True
     ):
@@ -180,15 +230,8 @@ def start_remote_negotiation(
     )
 
     user = session_db.get(User, user_id)
-    domain = get_domain(INTENT_MEETING_SCHEDULE)
     request_payload = domain.build_remote_request_payload(
-        {
-            "topic": topic,
-            "duration_minutes": duration_minutes,
-            "date_range": date_range,
-            "preferred_time_ranges": preferred_time_ranges,
-            "timezone": user.timezone if user else "UTC",
-        }
+        {**payload, "timezone": user.timezone if user else "UTC"}
     )
     own_position = domain.derive_own_position(session_db, clone, request_payload, peer_agent_id)
     candidates = own_position["candidates"][:_OFFER_SIZE]
@@ -198,8 +241,8 @@ def start_remote_negotiation(
         responder_clone_id=peer.agent_id,
         initiator_agent_id=personal.id,
         responder_agent_id=peer_personal_id,
-        intent=INTENT_MEETING_SCHEDULE,
-        topic=topic,
+        intent=intent,
+        topic=str(payload.get("topic") or ""),
         remote_peer_agent_id=peer_agent_id,
         last_sequence=2,
     )
@@ -448,6 +491,13 @@ def _request_human_decision(
     peer_node_id: str,
     peer_personal_agent_id: str,
 ) -> Approval:
+    # Phase F2: 承認payloadの脱ドメイン化。ドメイン非依存の `proposal` / `public_context` を
+    # ドメインに組み立てさせつつ、旧キー（selected_slot/candidate_slots）も従来どおり出力する
+    # （書き側の後方互換。`apps/desktop` の ApprovalsPage.tsx / AgreementsPage.tsx はこの2キーを
+    # 直接読んでいるため必須）。
+    context = get_domain(negotiation.intent).approval_context(
+        {"selected_slot": selected_slot, "candidate_slots": candidate_slots}
+    )
     approval = create_approval(
         session_db,
         user_id=clone.user_id,
@@ -459,6 +509,10 @@ def _request_human_decision(
             "intent": negotiation.intent,
             "remote": True,
             "proposed_action": "ACCEPT" if selected_slot else "COUNTER",
+            "proposal": context["proposal"],
+            "public_context": context["public_context"],
+            # 後方互換（書き側）: この変更以前のクライアント・UIがそのまま読めるよう、
+            # ドメイン固有の旧キーも並行して出力し続ける。
             "selected_slot": selected_slot or {},
             "candidate_slots": candidate_slots,
             "reason_codes": list(decision.reason_codes),
@@ -509,8 +563,14 @@ def resolve_remote_approval(
     session_db: Session,
     approval_id: str,
     target_status: str,
+    proposal_override: dict[str, Any] | None = None,
+    *,
     selected_slot_override: dict[str, str] | None = None,
 ) -> Approval:
+    # Phase F2: `selected_slot_override` はドメイン非依存の `proposal_override` への
+    # 後方互換の別名（呼び出し側・既存テストが引き続き使えるようにするため）。
+    if selected_slot_override is not None and proposal_override is None:
+        proposal_override = selected_slot_override
     """リモート交渉承認を一度だけ解決し、応答をOutboxへ原子的に保存する。"""
     approval = session_db.get(Approval, approval_id)
     if approval is None:
@@ -561,14 +621,20 @@ def resolve_remote_approval(
         )
 
     approved = target_status == ApprovalStatus.APPROVED.value
-    selected_slot = dict(approval.payload.get("selected_slot", {}))
+    # Phase F2 読み側後方互換: この変更以前に作られた承認レコードは `proposal` を持たず、
+    # `selected_slot` しか持たない（Phase E の decider_clone_id と同じフォールバックの形）。
+    proposal = approval.payload.get("proposal")
+    if isinstance(proposal, dict) and "selected_slot" in proposal:
+        selected_slot = dict(proposal.get("selected_slot") or {})
+    else:
+        selected_slot = dict(approval.payload.get("selected_slot", {}))
     candidate_slots = [
         dict(slot) for slot in approval.payload.get("candidate_slots", [])
         if isinstance(slot, dict)
     ]
     proposed_action = str(approval.payload.get("proposed_action", "ACCEPT"))
-    if approved and selected_slot_override is not None:
-        override = dict(selected_slot_override)
+    if approved and proposal_override is not None:
+        override = dict(proposal_override)
         if override not in candidate_slots:
             raise EnishiError(
                 code="INVALID_APPROVAL_SELECTION",

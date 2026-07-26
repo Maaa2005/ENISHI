@@ -81,6 +81,16 @@ import しているため残す）で、実体は持たない。全ドメイン�
    `payload_schema` が `payload_model.model_json_schema()` から自動導出される）。
    - `intent: str` — ドメイン識別子（例 `"expense.approval"`）。
    - `delegation_key: str | None` — `policies.delegation_enabled()` に渡すキー。委任判定が不要なら `None`。
+   - `supports_remote: bool`（既定 `False`） — Relay経由の遠隔交渉ドライバ（`services/remote_negotiation.py`）
+     に対応しているかどうか。**この値が `True` のドメインだけが、自ノードのAgent Cardの
+     `supported_intents` へ宣言される**（`services/identity_cards.py`, Phase F3）。宣言は
+     「相手から送られてきても処理できる」という約束であるため、遠隔ドライバの4フック
+     （`build_remote_request_payload` / `derive_own_position` / `decide_remote_reply` /
+     `remote_agreement_payload`。Phase F1）と `approval_context`（Phase F2、下記）を
+     実装し終えるまでは `True` にしないこと。実装していないのに宣言すると、相手が実際に
+     送ってきたときに壊れる。また `services/agent_requests.submit_agent_request` は、
+     この値が `False` のintentへの自然言語遠隔依頼を、ピアの能力を見るより前に
+     422 `INTENT_NOT_SUPPORTED_FOR_REMOTE_REQUEST` で拒否する（Phase F4-a）。
    - `payload_model` — `payload` を検証する pydantic モデル。`payload_schema` プロパティが
      ここから JSON Schema を生成し、`GET /v1/intents` で公開する。
    - `validate_request(body) -> DomainRequest` — `payload_model.model_validate(body.payload)` で
@@ -88,6 +98,15 @@ import しているため残す）で、実体は持たない。全ドメイン�
      `EnishiError(code="INVALID_NEGOTIATION_PAYLOAD", status_code=422)` へ変換する。
    - `topic_of(request) -> str` — `NegotiationSession.topic` に入れる値。
    - `start(session_db, request) -> NegotiationSession` — 交渉を進行させる。
+   - `approval_context(raw) -> dict`（Phase F2） — 遠隔交渉が人間承認を要するとき
+     （`_request_human_decision`, `services/remote_negotiation.py`）、承認payloadに積む
+     ドメイン非依存の2キー `proposal`（人間が是非を判断する対象）と `public_context`
+     （承認画面向けの**公開可能な**補助情報）を組み立てる。留保価格・効用パラメータ・
+     記憶の生データのような私的情報を `public_context` に入れないこと（`tests/test_cost_split.py`
+     の `_assert_no_forbidden_keys` と同じ「最小情報の原則」がここにも適用される）。
+     承認payloadは後方互換のため、ドメイン固有の旧キー（meetingなら `selected_slot` /
+     `candidate_slots`）も並行して出力し続ける。読み側は `proposal` が無ければ
+     旧キーへフォールバックする。
 
    `domains/common.py` の `require_active_clone` / `create_agreement` /
    `create_negotiation_approval` / `append_message` は、どの構造でも共通して使える。

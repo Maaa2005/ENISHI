@@ -5,7 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from enishi_core.domains.value_objects import DateRange, TimeRange
+from enishi_core.domains.value_objects import DateRange as DateRange
+from enishi_core.domains.value_objects import TimeRange
 
 
 class HealthResponse(BaseModel):
@@ -276,12 +277,36 @@ class NegotiationCreate(BaseModel):
 
 
 class RemoteNegotiationCreate(BaseModel):
+    """Relay経由の遠隔交渉開始のワイヤ表現。スキーマ層にドメイン語彙を持たない（Phase F4-b）。
+
+    `NegotiationCreate`（Phase B）と同じパターン: ドメイン固有のフィールドは不透明な
+    `payload` に入れる。
+
+    後方互換: `payload` が空のとき、`model_extra` に入った未知フィールド（旧来のフラットな
+    `topic` / `duration_minutes` / `date_range` / `preferred_time_ranges` 形式）をそのまま
+    `payload` へ畳み込む。両方指定された場合は `payload` を優先する。
+    """
+
+    model_config = ConfigDict(extra="allow")
+
     user_id: str
     peer_agent_id: str
-    topic: str = Field(min_length=1, max_length=500)
-    duration_minutes: int = Field(ge=1, le=480)
-    date_range: DateRange
-    preferred_time_ranges: list[TimeRange] = Field(min_length=1)
+    intent: str = Field(default="meeting.schedule")
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("intent")
+    @classmethod
+    def validate_intent(cls, value: str) -> str:
+        from enishi_core.domains import get_domain
+
+        get_domain(value)
+        return value
+
+    @model_validator(mode="after")
+    def fold_legacy_flat_fields(self) -> "RemoteNegotiationCreate":
+        if not self.payload and self.model_extra:
+            self.payload = dict(self.model_extra)
+        return self
 
 
 class AgentRequestCreate(BaseModel):

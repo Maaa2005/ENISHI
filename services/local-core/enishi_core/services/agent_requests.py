@@ -9,10 +9,6 @@ from sqlalchemy.orm import Session
 
 from enishi_core.config import get_settings
 from enishi_core.domains import get_domain
-from enishi_core.domains.meeting_schedule import (
-    INTENT_MEETING_SCHEDULE,
-    MeetingScheduleRequest,
-)
 from enishi_core.errors import EnishiError
 from enishi_core.models import (
     CloneAgent,
@@ -193,7 +189,9 @@ def submit_agent_request(
     # 曖昧入力・未知intentはDB/Relayへ副作用を起こす前に拒否する（LLMの出力は必ずここを通す）。
     interpreted = get_interpreter(get_settings(), session=session).interpret(text)
     domain = get_domain(interpreted.intent)
-    validated = domain.validate_request(
+    # 戻り値（ドメイン固有の検証済みオブジェクト）は使わない。ここでの目的は
+    # 「payloadがこのintentの語彙として妥当か」をDB/Relayへ触れる前に検証すること。
+    domain.validate_request(
         _InterpretedNegotiationRequest(
             intent=interpreted.intent,
             initiator_user_id=user_id,
@@ -201,16 +199,19 @@ def submit_agent_request(
             payload=interpreted.payload,
         )
     )
-    if interpreted.intent != INTENT_MEETING_SCHEDULE:
-        # Relay経由の遠隔交渉（start_remote_negotiation）は現状meeting.scheduleのみ対応。
-        # 他ドメインの遠隔交渉ドライバはPhase Cの範囲外（禁止事項: DBスキーマ変更なし）。
+    if not domain.supports_remote:
+        # Phase F4-a: ここは「ENISHI側が遠隔ドライバを未実装」というケースだけを扱う。
+        # 「相手が対応していない」場合は、この後 start_remote_negotiation 内の
+        # _require_peer_capability が既存の409 PEER_CAPABILITY_MISMATCHへ導く。
+        # 以前はここが `intent != meeting.schedule` というハードコードだったため、
+        # cost.split に対応している相手に対しても「ENISHIが未対応」という誤ったメッセージを
+        # 返していた（このチェックはピアの能力を見る前に発火するため）。
         raise EnishiError(
             code="INTENT_NOT_SUPPORTED_FOR_REMOTE_REQUEST",
             message="このドメインはまだ自然言語依頼からの遠隔交渉に対応していません。",
             status_code=422,
             details={"intent": interpreted.intent},
         )
-    assert isinstance(validated, MeetingScheduleRequest)
 
     if not delegation_enabled(
         session, user_id, "schedule_negotiation", default=True
@@ -234,13 +235,12 @@ def submit_agent_request(
 
     from enishi_core.services.remote_negotiation import start_remote_negotiation
 
+    # Phase F4-b: meeting決め打ちの引数ではなく intent + payload で汎用ディスパッチする。
     return start_remote_negotiation(
         session,
         relay,
         user_id=user_id,
         peer_agent_id=peer.agent_id,
-        topic=validated.topic,
-        duration_minutes=validated.duration_minutes,
-        date_range=dict(validated.date_range),
-        preferred_time_ranges=list(validated.preferred_time_ranges),
+        intent=interpreted.intent,
+        payload=interpreted.payload,
     )

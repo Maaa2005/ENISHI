@@ -182,6 +182,19 @@ class MeetingScheduleDomain(BaseDecisionDomain):
         """遠隔交渉合意の agreed_payload（Phase F1: `_meeting_agreement_payload` を移設）。"""
         return {"selected_slot": dict(agreed)}
 
+    def approval_context(self, raw: dict[str, Any]) -> dict[str, Any]:
+        """承認payloadの `proposal` / `public_context`（Phase F2）。
+
+        `selected_slot` / `candidate_slots` はどちらも日時の範囲だけを持ち、
+        留保価格・効用パラメータのような私的情報は含まない。
+        """
+        selected_slot = raw.get("selected_slot")
+        candidate_slots = list(raw.get("candidate_slots") or [])
+        return {
+            "proposal": {"selected_slot": dict(selected_slot)} if selected_slot else {},
+            "public_context": {"candidate_slots": candidate_slots},
+        }
+
 
 def _slot_label(slot: Slot) -> str:
     return f"{slot['start']}〜{slot['end'].split('T')[-1]}"

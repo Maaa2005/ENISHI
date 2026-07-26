@@ -635,10 +635,8 @@ def start_remote_negotiation(
         get_relay_client(),
         user_id=body.user_id,
         peer_agent_id=body.peer_agent_id,
-        topic=body.topic,
-        duration_minutes=body.duration_minutes,
-        date_range=body.date_range.model_dump(),
-        preferred_time_ranges=[r.model_dump() for r in body.preferred_time_ranges],
+        intent=body.intent,
+        payload=body.payload,
     )
     return NegotiationRead.model_validate(negotiation)
 
