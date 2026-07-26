@@ -37,6 +37,7 @@ from enishi_core.models import (
 )
 from enishi_core.services.audit import log_event
 from enishi_core.services.memories import exportable_memories
+from enishi_core.services.peers import filter_memories_for_peer, get_disclosure_policy
 from enishi_core.services.policies import delegation_enabled as delegation_enabled_policy
 from enishi_core.services.scheduling import (
     Slot,
@@ -77,6 +78,7 @@ class MeetingScheduleDomain(BaseDecisionDomain):
     # meeting の run_negotiation は現状 delegation を見ていないため、
     # ここで新たに delegation_key を見に行かない（挙動が変わる）。
     delegation_key: str | None = None
+    supports_remote = True
     payload_model = MeetingSchedulePayload
 
     def validate_request(self, body: NegotiationRequestLike) -> DomainRequest:
@@ -120,6 +122,65 @@ class MeetingScheduleDomain(BaseDecisionDomain):
     def evaluate_decision(self, **kwargs: Any) -> DecisionEvaluation:
         """E3-a: ローカル/リモート両ドライバが同じ判断コードへレジストリ経由でたどり着く継ぎ目。"""
         return evaluate_meeting_schedule(**kwargs)
+
+    def build_remote_request_payload(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Relay経由の初回REQUESTのワイヤpayload（Phase F1: `remote_negotiation.py` から移設）。"""
+        return {
+            "intent": INTENT_MEETING_SCHEDULE,
+            "topic": request["topic"],
+            "duration_minutes": request["duration_minutes"],
+            "date_range": request["date_range"],
+            "preferred_time_ranges": request["preferred_time_ranges"],
+            "timezone": request["timezone"],
+        }
+
+    def derive_own_position(
+        self,
+        session_db: Session,
+        clone: CloneAgent,
+        request_payload: dict[str, Any],
+        peer_agent_id: str,
+    ) -> dict[str, Any]:
+        """自分側の候補スロット一覧（Phase F1: `remote_negotiation._own_candidates` を移設）。"""
+        policy = get_disclosure_policy(session_db, peer_agent_id)
+        if not policy.share_schedule:
+            raise EnishiError(
+                code="DISCLOSURE_POLICY_DENIED",
+                message="このピアには日程候補を公開しません。",
+                status_code=403,
+                details={"peer_agent_id": peer_agent_id},
+            )
+        memories = filter_memories_for_peer(
+            exportable_memories(session_db, clone.user_id), policy
+        )
+        user = session_db.get(User, clone.user_id)
+        timezone = user.timezone if user else "UTC"
+        busy = collect_busy(memories, timezone)
+        candidates = candidate_slots(
+            dict(request_payload["date_range"]),
+            list(request_payload["preferred_time_ranges"]),
+            int(request_payload["duration_minutes"]),
+            busy,
+            timezone,
+        )
+        return {"candidates": candidates}
+
+    def decide_remote_reply(
+        self, own_position: dict[str, Any], received_public: dict[str, Any]
+    ) -> dict[str, Any]:
+        """共通スロットの交差（Phase F1: `remote_negotiation._handle_envelope` から移設）。"""
+        own = own_position.get("candidates", [])
+        received = [dict(s) for s in received_public.get("candidate_slots", [])]
+        common = intersect_slots(own, received)
+        return {
+            "common_slot_count": len(common),
+            "selected_slot": common[0] if common else None,
+            "counter_offer": own[:_OFFER_SIZE],
+        }
+
+    def remote_agreement_payload(self, agreed: dict[str, Any]) -> dict[str, Any]:
+        """遠隔交渉合意の agreed_payload（Phase F1: `_meeting_agreement_payload` を移設）。"""
+        return {"selected_slot": dict(agreed)}
 
 
 def _slot_label(slot: Slot) -> str:

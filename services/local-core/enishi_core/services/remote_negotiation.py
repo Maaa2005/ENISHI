@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from enishi_core.config import get_settings
 from enishi_core.domains import get_domain
+from enishi_core.domains.meeting_schedule import INTENT_MEETING_SCHEDULE
 from enishi_core.errors import EnishiError
 from enishi_core.models import (
     Agreement,
@@ -36,19 +37,10 @@ from enishi_core.security.replay import check_and_record
 from enishi_core.services import protocol_state
 from enishi_core.services.approvals import create_approval
 from enishi_core.services.audit import log_event
-from enishi_core.services.memories import exportable_memories
-from enishi_core.services.peers import filter_memories_for_peer, get_disclosure_policy
 from enishi_core.services.policies import delegation_enabled
 from enishi_core.services.public_reasons import to_public_reason
 from enishi_core.services.relay_client import RelayTransport
-from enishi_core.services.scheduling import (
-    Slot,
-    candidate_slots,
-    collect_busy,
-    intersect_slots,
-)
 
-INTENT = "meeting.schedule"
 _OFFER_SIZE = 5
 _PROTOCOL = "aun/0.2"
 
@@ -103,30 +95,6 @@ def _find_active_clone(session_db: Session, user_id: str | None = None) -> Clone
     return clone
 
 
-def _own_candidates(
-    session_db: Session, user_id: str, request_payload: dict[str, Any], peer_agent_id: str
-) -> list[Slot]:
-    policy = get_disclosure_policy(session_db, peer_agent_id)
-    if not policy.share_schedule:
-        raise EnishiError(
-            code="DISCLOSURE_POLICY_DENIED",
-            message="このピアには日程候補を公開しません。",
-            status_code=403,
-            details={"peer_agent_id": peer_agent_id},
-        )
-    memories = filter_memories_for_peer(exportable_memories(session_db, user_id), policy)
-    user = session_db.get(User, user_id)
-    timezone = user.timezone if user else "UTC"
-    busy = collect_busy(memories, timezone)
-    return candidate_slots(
-        dict(request_payload["date_range"]),
-        list(request_payload["preferred_time_ranges"]),
-        int(request_payload["duration_minutes"]),
-        busy,
-        timezone,
-    )
-
-
 def _save_message(
     session_db: Session, session_id: str, envelope: dict[str, Any]
 ) -> NegotiationMessage:
@@ -174,7 +142,7 @@ def start_remote_negotiation(
 ) -> NegotiationSession:
     """Relay経由で相手ノードへREQUESTとPROPOSEを送る（送信側）。"""
     peer = _require_trusted_peer(session_db, peer_agent_id)
-    _require_peer_capability(peer, INTENT)
+    _require_peer_capability(peer, INTENT_MEETING_SCHEDULE)
     if not delegation_enabled(
         session_db, user_id, "schedule_negotiation", default=True
     ):
@@ -212,24 +180,25 @@ def start_remote_negotiation(
     )
 
     user = session_db.get(User, user_id)
-    request_payload: dict[str, Any] = {
-        "intent": INTENT,
-        "topic": topic,
-        "duration_minutes": duration_minutes,
-        "date_range": date_range,
-        "preferred_time_ranges": preferred_time_ranges,
-        "timezone": user.timezone if user else "UTC",
-    }
-    candidates = _own_candidates(session_db, user_id, request_payload, peer_agent_id)[
-        :_OFFER_SIZE
-    ]
+    domain = get_domain(INTENT_MEETING_SCHEDULE)
+    request_payload = domain.build_remote_request_payload(
+        {
+            "topic": topic,
+            "duration_minutes": duration_minutes,
+            "date_range": date_range,
+            "preferred_time_ranges": preferred_time_ranges,
+            "timezone": user.timezone if user else "UTC",
+        }
+    )
+    own_position = domain.derive_own_position(session_db, clone, request_payload, peer_agent_id)
+    candidates = own_position["candidates"][:_OFFER_SIZE]
 
     negotiation = NegotiationSession(
         initiator_clone_id=clone.id,
         responder_clone_id=peer.agent_id,
         initiator_agent_id=personal.id,
         responder_agent_id=peer_personal_id,
-        intent=INTENT,
+        intent=INTENT_MEETING_SCHEDULE,
         topic=topic,
         remote_peer_agent_id=peer_agent_id,
         last_sequence=2,
@@ -243,7 +212,7 @@ def start_remote_negotiation(
         receiver=peer_personal_id,
         session_id=negotiation.id,
         message_type="REQUEST",
-        intent=INTENT,
+        intent=negotiation.intent,
         session_version=negotiation.session_version,
         sequence=1,
         payload=request_payload,
@@ -257,7 +226,7 @@ def start_remote_negotiation(
         receiver=peer_personal_id,
         session_id=negotiation.id,
         message_type="PROPOSE",
-        intent=INTENT,
+        intent=negotiation.intent,
         session_version=negotiation.session_version,
         sequence=2,
         payload={},
@@ -388,7 +357,7 @@ def _build_reply_envelope(
         receiver=receiver,
         session_id=negotiation.id,
         message_type=message_type,
-        intent=INTENT,
+        intent=negotiation.intent,
         session_version=negotiation.session_version,
         sequence=sequence,
         payload=payload or {},
@@ -431,11 +400,6 @@ def _create_remote_agreement(
     return agreement
 
 
-def _meeting_agreement_payload(selected_slot: dict[str, Any]) -> dict[str, Any]:
-    """両ノードで一致する、合意そのものだけをwire由来データから構成する。"""
-    return {"selected_slot": dict(selected_slot)}
-
-
 def _record_decision(
     session_db: Session,
     negotiation: NegotiationSession,
@@ -449,7 +413,7 @@ def _record_decision(
     # E3-a: 判断コードの二重化（ローカル run_negotiation とリモートで別々に評価していた）を
     # 構造的に解消するため、`evaluate_meeting_schedule` を直接 import せず、レジストリ経由で
     # ドメインの評価関数を呼ぶ。
-    evaluation = get_domain(INTENT).evaluate_decision(
+    evaluation = get_domain(negotiation.intent).evaluate_decision(
         clone=clone,
         delegation_enabled=delegation_enabled(
             session_db, clone.user_id, "schedule_negotiation", default=True
@@ -677,7 +641,9 @@ def resolve_remote_approval(
         negotiation.status = NegotiationStatus.AGREED.value
         negotiation.result = {"selected_slot": selected_slot, "approved_by_human": True}
         _create_remote_agreement(
-            session_db, negotiation, _meeting_agreement_payload(selected_slot)
+            session_db,
+            negotiation,
+            get_domain(negotiation.intent).remote_agreement_payload(selected_slot),
         )
     elif approved:
         negotiation.status = NegotiationStatus.OPEN.value
@@ -744,7 +710,7 @@ def _handle_envelope(
             responder_clone_id=responder_id,
             initiator_agent_id=sender if "sender_node_id" in envelope else None,
             responder_agent_id=receiver if "sender_node_id" in envelope else None,
-            intent=str(envelope.get("intent", INTENT)),
+            intent=str(envelope.get("intent", INTENT_MEETING_SCHEDULE)),
             topic=str(envelope.get("payload", {}).get("topic", "")),
             remote_peer_agent_id=sender_node,
             last_sequence=sequence,
@@ -784,18 +750,23 @@ def _handle_envelope(
                 )
         else:
             clone = _find_active_clone(session_db)
+        domain = get_domain(negotiation.intent)
         request_payload = _request_payload(session_db, session_id)
-        own = _own_candidates(session_db, clone.user_id, request_payload, sender_node)
-        received = [dict(s) for s in envelope.get("delta", {}).get("candidate_slots", [])]
-        common = intersect_slots(own, received)
+        own_position = domain.derive_own_position(
+            session_db, clone, request_payload, sender_node
+        )
+        reply = domain.decide_remote_reply(own_position, envelope.get("delta", {}))
+        common_slot_count = int(reply["common_slot_count"])
+        selected_slot = reply["selected_slot"]
+        counter_offer = reply["counter_offer"]
         rounds = _counter_rounds(session_db, session_id) + 1
         sender_personal_id = personal.id if personal else ""
         decision = _record_decision(
             session_db,
             negotiation,
             clone,
-            common_slot_count=len(common),
-            selected_slot=common[0] if common else None,
+            common_slot_count=common_slot_count,
+            selected_slot=selected_slot,
             peer_personal_agent_id=sender,
         )
         if decision.outcome == "approval_required":
@@ -804,15 +775,15 @@ def _handle_envelope(
                 negotiation,
                 clone,
                 decision,
-                selected_slot=common[0] if common else None,
-                candidate_slots=own[:_OFFER_SIZE],
+                selected_slot=selected_slot,
+                candidate_slots=counter_offer,
                 peer_node_id=sender_node,
                 peer_personal_agent_id=sender,
             )
             session_db.commit()
             return {"message_id": message_id, "action": "approval_required"}
-        if common:
-            selected = common[0]
+        if common_slot_count > 0:
+            selected = selected_slot
             _send_reply(
                 session_db, relay, negotiation, sender_personal_id, sender, sender_node,
                 "ACCEPT", sequence + 1,
@@ -821,13 +792,13 @@ def _handle_envelope(
             negotiation.status = NegotiationStatus.AGREED.value
             negotiation.result = {"selected_slot": selected, "rounds": rounds}
             _create_remote_agreement(
-                session_db, negotiation, _meeting_agreement_payload(selected)
+                session_db, negotiation, domain.remote_agreement_payload(selected)
             )
         elif rounds < protocol_state.MAX_COUNTER_ROUNDS:
             _send_reply(
                 session_db, relay, negotiation, sender_personal_id, sender, sender_node,
                 "COUNTER", sequence + 1,
-                {"candidate_slots": own[:_OFFER_SIZE]},
+                {"candidate_slots": counter_offer},
                 {"public_reason": to_public_reason(decision.reason_codes)},
             )
         else:
@@ -847,7 +818,9 @@ def _handle_envelope(
         _create_remote_agreement(
             session_db,
             negotiation,
-            _meeting_agreement_payload(negotiation.result["selected_slot"]),
+            get_domain(negotiation.intent).remote_agreement_payload(
+                negotiation.result["selected_slot"]
+            ),
         )
     elif message_type in ("REJECT", "ERROR"):
         negotiation.status = NegotiationStatus.FAILED.value
