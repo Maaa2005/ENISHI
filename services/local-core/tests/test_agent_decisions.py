@@ -160,6 +160,7 @@ def test_remote_low_confidence_waits_for_human_and_responds_once(
     from enishi_core.database import get_session
     from enishi_core.models import (
         Agreement,
+        CloneAgent,
         NegotiationDecision,
         NegotiationSession,
         PeerAgent,
@@ -171,6 +172,18 @@ def test_remote_low_confidence_waits_for_human_and_responds_once(
     from enishi_core.services.remote_negotiation import process_inbox
 
     _user_id, _clone_id = _user_and_clone(client, auth_headers)
+    # E3-c: 活性化時に confidence_score が閾値まで引き上げられるようになったため
+    # （活性化＝人間のレビュー通過という承認ゲート）、このテストの前提である
+    # 「confidenceが低い」状態を、活性化後に記憶削除などで信頼度が下がったケースとして
+    # 明示的に作る（enishi.md §17、outdated クローン）。仕様変更ではなくフィクスチャの追随。
+    session = next(get_session())
+    try:
+        clone = session.get(CloneAgent, _clone_id)
+        assert clone is not None
+        clone.confidence_score = 0.4
+        session.commit()
+    finally:
+        session.close()
     sender_identity, sender_private = ensure_node_keypair(tmp_path / "sender")
     created = client.post(
         "/v1/peers",
@@ -380,10 +393,21 @@ def test_malformed_signed_payload_is_acked_and_isolated(
         session.close()
 
     assert relay.acked == ["poison-request", "poison-propose"]
+    # Phase G2: 受信REQUESTもドメイン検証を通すようになったため、この不正payload
+    # （duration_minutes が数値でない）は REQUEST の時点で INVALID_NEGOTIATION_PAYLOAD
+    # として弾かれ、セッションは永続化されない。以前は REQUEST が無検証で保存され、
+    # 後続の PROPOSE 処理中に汎用例外 MESSAGE_PROCESSING_FAILED として現れていた
+    # （このタスクが埋めた「受信側が壊れたpayloadを素通りさせる穴」そのもの）。
+    # PROPOSE はセッションが存在しないため INVALID_STATE_TRANSITION で拒否される。
+    assert result["results"][0] == {
+        "message_id": request["message_id"],
+        "action": "rejected",
+        "code": "INVALID_NEGOTIATION_PAYLOAD",
+    }
     assert result["results"][1] == {
         "message_id": propose["message_id"],
         "action": "rejected",
-        "code": "MESSAGE_PROCESSING_FAILED",
+        "code": "INVALID_STATE_TRANSITION",
     }
 
 

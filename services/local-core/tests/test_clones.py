@@ -56,6 +56,57 @@ def test_activate_clone(client: TestClient, auth_headers: dict[str, str]) -> Non
     assert again.json()["error"]["code"] == "INVALID_STATE_TRANSITION"
 
 
+def test_activate_clone_raises_confidence_to_threshold(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """新規6. E3-c: 活性化は人間のレビュー通過（承認ゲート）であるため、activate 時に
+    confidence_score が CONFIDENCE_THRESHOLD（0.6）まで引き上げられる
+    （新規クローンはメモリ0件で bootstrap 時 0.3 のまま。それより下がることはない）。
+    """
+    from enishi_core.domains.common import CONFIDENCE_THRESHOLD
+
+    user_id = _create_user(client, auth_headers)
+    clone = client.post(
+        f"/v1/clones/{user_id}/ensure",
+        json={"purpose": "コーディング支援", "provider_type": "mock"},
+        headers=auth_headers,
+    ).json()
+    assert clone["confidence_score"] < CONFIDENCE_THRESHOLD
+
+    activated = client.post(f"/v1/clones/{clone['id']}/activate", headers=auth_headers)
+    assert activated.status_code == 200
+    assert activated.json()["confidence_score"] >= CONFIDENCE_THRESHOLD
+
+
+def test_activate_clone_does_not_lower_existing_confidence(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """新規6（補足）: activate 前の confidence_score が既に閾値を超えていた場合、
+    max(current, threshold) であって threshold へ切り下げられないことを確認する。
+    """
+    from enishi_core.database import get_session
+    from enishi_core.models import CloneAgent
+
+    user_id = _create_user(client, auth_headers)
+    clone = client.post(
+        f"/v1/clones/{user_id}/ensure",
+        json={"purpose": "コーディング支援", "provider_type": "mock"},
+        headers=auth_headers,
+    ).json()
+    session = next(get_session())
+    try:
+        db_clone = session.get(CloneAgent, clone["id"])
+        assert db_clone is not None
+        db_clone.confidence_score = 0.95
+        session.commit()
+    finally:
+        session.close()
+
+    activated = client.post(f"/v1/clones/{clone['id']}/activate", headers=auth_headers)
+    assert activated.status_code == 200
+    assert activated.json()["confidence_score"] == 0.95
+
+
 def test_ensure_unknown_user_returns_404(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:

@@ -1,14 +1,14 @@
 """人間の自然言語依頼を本人エージェントの交渉へ変換するMVP。"""
 
-import re
 import unicodedata
-from datetime import date, time
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from enishi_core.config import get_settings
+from enishi_core.domains import get_domain
 from enishi_core.errors import EnishiError
 from enishi_core.models import (
     CloneAgent,
@@ -20,69 +20,32 @@ from enishi_core.models import (
     User,
 )
 from enishi_core.security.keys import ensure_node_keypair
+from enishi_core.services.intent_interpreter import DeterministicInterpreter, get_interpreter
 from enishi_core.services.policies import delegation_enabled
 from enishi_core.services.relay_client import RelayTransport
 
-_DATE_RE = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)")
-_DURATION_RE = re.compile(r"(?<!\d)(\d{1,3})\s*分")
-_TIME_RANGE_RE = re.compile(
-    r"(?<!\d)(\d{2}:\d{2})\s*(?:〜|～|~|-|から)\s*(\d{2}:\d{2})(?!\d)"
-)
-
-
-def _ambiguous(missing_or_invalid: list[str]) -> EnishiError:
-    return EnishiError(
-        code="AGENT_REQUEST_AMBIGUOUS",
-        message="依頼を確定できません。日付・所要時間・時間帯を明記してください。",
-        status_code=422,
-        details={
-            "fields": missing_or_invalid,
-            "example": "2026-07-20に30分、13:00〜17:00で打ち合わせ",
-        },
-    )
-
 
 def interpret_meeting_request(text: str) -> dict[str, Any]:
-    """明示されたISO日付・N分・HH:MM範囲だけを決定的に解釈する。"""
-    dates = _DATE_RE.findall(text)
-    durations = _DURATION_RE.findall(text)
-    time_ranges = _TIME_RANGE_RE.findall(text)
-    invalid: list[str] = []
-    if len(dates) != 1:
-        invalid.append("date")
-    if len(durations) != 1:
-        invalid.append("duration_minutes")
-    if len(time_ranges) != 1:
-        invalid.append("preferred_time_range")
-    if invalid:
-        raise _ambiguous(invalid)
+    """後方互換ラッパ。実体は `intent_interpreter.DeterministicInterpreter` へ移設済み
+    （既存テストが直接importしている可能性があるため残す）。
+    """
+    interpreted = DeterministicInterpreter().interpret(text)
+    return {"intent": interpreted.intent, **interpreted.payload}
 
-    date_value = dates[0]
-    duration = int(durations[0])
-    start_value, end_value = time_ranges[0]
-    try:
-        date.fromisoformat(date_value)
-        start_time = time.fromisoformat(start_value)
-        end_time = time.fromisoformat(end_value)
-    except ValueError as exc:
-        raise _ambiguous(["date_or_time"]) from exc
 
-    available_minutes = (
-        end_time.hour * 60
-        + end_time.minute
-        - start_time.hour * 60
-        - start_time.minute
-    )
-    if duration < 1 or duration > 480 or available_minutes < duration:
-        raise _ambiguous(["duration_or_time_range"])
+@dataclass
+class _InterpretedNegotiationRequest:
+    """`get_interpreter().interpret()` の結果を `DecisionDomain.validate_request()` へ渡すための
+    `NegotiationRequestLike` 実装（`domains/base.py` 参照）。
 
-    return {
-        "intent": "meeting.schedule",
-        "topic": text.strip()[:500] or "日程調整",
-        "duration_minutes": duration,
-        "date_range": {"start": date_value, "end": date_value},
-        "preferred_time_ranges": [{"start": start_value, "end": end_value}],
-    }
+    `NegotiationRequestLike` は属性への代入可能性まで構造的に要求するため（mypyの
+    Protocol互換チェック）、frozenにはしない。
+    """
+
+    intent: str
+    initiator_user_id: str
+    responder_user_id: str
+    payload: dict[str, Any]
 
 
 def ensure_personal_agent(session: Session, user_id: str) -> PersonalAgent:
@@ -223,16 +186,44 @@ def submit_agent_request(
     text: str,
     peer_agent_id: str | None,
 ) -> object:
-    # 曖昧入力はDB/Relayへ副作用を起こす前に拒否する。
-    request = interpret_meeting_request(text)
-    if not delegation_enabled(
-        session, user_id, "schedule_negotiation", default=True
-    ):
+    # 曖昧入力・未知intentはDB/Relayへ副作用を起こす前に拒否する（LLMの出力は必ずここを通す）。
+    interpreted = get_interpreter(get_settings(), session=session).interpret(text)
+    domain = get_domain(interpreted.intent)
+    # 戻り値（ドメイン固有の検証済みオブジェクト）は使わない。ここでの目的は
+    # 「payloadがこのintentの語彙として妥当か」をDB/Relayへ触れる前に検証すること。
+    domain.validate_request(
+        _InterpretedNegotiationRequest(
+            intent=interpreted.intent,
+            initiator_user_id=user_id,
+            responder_user_id="",
+            payload=interpreted.payload,
+        )
+    )
+    if not domain.supports_remote:
+        # Phase F4-a: ここは「ENISHI側が遠隔ドライバを未実装」というケースだけを扱う。
+        # 「相手が対応していない」場合は、この後 start_remote_negotiation 内の
+        # _require_peer_capability が既存の409 PEER_CAPABILITY_MISMATCHへ導く。
+        # 以前はここが `intent != meeting.schedule` というハードコードだったため、
+        # cost.split に対応している相手に対しても「ENISHIが未対応」という誤ったメッセージを
+        # 返していた（このチェックはピアの能力を見る前に発火するため）。
+        raise EnishiError(
+            code="INTENT_NOT_SUPPORTED_FOR_REMOTE_REQUEST",
+            message="このドメインはまだ自然言語依頼からの遠隔交渉に対応していません。",
+            status_code=422,
+            details={"intent": interpreted.intent},
+        )
+
+    # F5-b: 「schedule_negotiation」決め打ちだと cost.split 等の他ドメインの委任OFFが
+    # 効かない（常に meeting 用のキーを見てしまう）ため、domain.delegation_key を使う
+    # （`services/remote_negotiation.py` と同じ一般化。meeting は delegation_key=None なので
+    # 挙動は変わらない）。
+    delegation_key = domain.delegation_key or "schedule_negotiation"
+    if not delegation_enabled(session, user_id, delegation_key, default=True):
         raise EnishiError(
             code="NEGOTIATION_PERMISSION_DENIED",
-            message="日程調整は本人代理AIへ委任されていません。",
+            message="この交渉は本人代理AIへ委任されていません。",
             status_code=403,
-            details={"operation": "schedule_negotiation"},
+            details={"operation": delegation_key},
         )
     peer = resolve_trusted_peer(session, peer_agent_id, text)
     personal = ensure_personal_agent(session, user_id)
@@ -247,13 +238,12 @@ def submit_agent_request(
 
     from enishi_core.services.remote_negotiation import start_remote_negotiation
 
+    # Phase F4-b: meeting決め打ちの引数ではなく intent + payload で汎用ディスパッチする。
     return start_remote_negotiation(
         session,
         relay,
         user_id=user_id,
         peer_agent_id=peer.agent_id,
-        topic=str(request["topic"]),
-        duration_minutes=int(request["duration_minutes"]),
-        date_range=dict(request["date_range"]),
-        preferred_time_ranges=list(request["preferred_time_ranges"]),
+        intent=interpreted.intent,
+        payload=interpreted.payload,
     )

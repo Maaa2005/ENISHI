@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlparse
 
 from pydantic import Field, model_validator
@@ -30,6 +31,11 @@ class Settings(BaseSettings):
     task_worker_poll_interval_seconds: float = Field(default=0.5, gt=0)
     task_worker_id: str = "local-core-worker-1"
     auto_discover_external_memory: bool = True
+
+    # Phase C: LLMによるintent解釈層（services/intent_interpreter.py）。
+    # APIキーはここに持たせない。Anthropic() が ANTHROPIC_API_KEY 等の環境／プロファイルを解決する。
+    anthropic_model: str = "claude-opus-5"
+    intent_interpreter: Literal["deterministic", "claude"] = "deterministic"
 
     data_dir: Path = Path.home() / "Library" / "Application Support" / "ENISHI"
     cache_dir: Path = Path.home() / "Library" / "Caches" / "ENISHI"

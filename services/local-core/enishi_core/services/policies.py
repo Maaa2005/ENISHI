@@ -12,6 +12,7 @@ DELEGATION_DEFAULTS = {
     "task_negotiation": True,
     "coding_task": True,
     "external_service_operation": False,
+    "cost_split_negotiation": True,
 }
 
 APPROVAL_RULE_DEFAULTS = {

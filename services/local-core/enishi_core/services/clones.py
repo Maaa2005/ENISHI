@@ -120,6 +120,17 @@ def activate_clone(session: Session, clone_id: str) -> CloneAgent:
         )
     clone.status = CloneStatus.ACTIVE.value
     clone.activated_at = utc_now()
+    # E3-c: 活性化そのものが人間のレビュー通過（承認ゲート）である
+    # （services/clone_bootstrap.py は REVIEW_REQUIRED でクローンを作り、
+    # ここで初めて ACTIVE にする）。
+    # 承認済みのクローンが「記憶が少なくてconfidenceが低いから何もできない」のは筋が通らないため、
+    # 活性化時に confidence_score を閾値（decision_evaluator/domains.common.CONFIDENCE_THRESHOLD）
+    # まで引き上げる。clone_bootstrap の算出式自体（レビュー前の「どれだけ知っているか」の指標）は
+    # 変えない。閾値ガードが無意味にならないのは、活性化「後」に記憶削除等で confidence が
+    # 下がったケース（enishi.md §17、outdated クローン）でこのガードが正しく発火するため。
+    from enishi_core.domains.common import CONFIDENCE_THRESHOLD
+
+    clone.confidence_score = max(clone.confidence_score, CONFIDENCE_THRESHOLD)
     # PersonalAgentが既に作成済みなら、委任先クローンを同時に切り替える。
     from enishi_core.models import PersonalAgent
 
