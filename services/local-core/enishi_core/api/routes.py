@@ -424,7 +424,7 @@ def approve_approval(
             session,
             approval_id,
             ApprovalStatus.APPROVED.value,
-            body.selected_slot if body else None,
+            body.proposal_override if body else None,
         )
         try:
             remote_negotiation.flush_outbox(session, get_relay_client())

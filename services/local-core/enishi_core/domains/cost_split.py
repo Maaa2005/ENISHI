@@ -381,7 +381,16 @@ class CostSplitDomain(BaseDecisionDomain):
             return {"message_type": "REJECT", "delta": {"code": code}, "agreement_value": None}
 
         agreed_share = proposal.get("agreed_share")
-        if override is not None and override.get("agreed_share") is not None:
+        if override is not None:
+            # 上書きが指定されたのに cost.split が解釈できる形（`agreed_share`）を
+            # 持たない場合、黙って元の金額へフォールバックしない。人間が金額を
+            # 修正したつもりで意図しない金額が承認されるのを防ぐ（Phase G5）。
+            if not isinstance(override, dict) or override.get("agreed_share") is None:
+                raise EnishiError(
+                    code="INVALID_APPROVAL_SELECTION",
+                    message="上書きする分担額（agreed_share）を指定してください。",
+                    status_code=422,
+                )
             agreed_share = override["agreed_share"]
         if agreed_share is None:
             raise EnishiError(
@@ -389,7 +398,14 @@ class CostSplitDomain(BaseDecisionDomain):
                 message="承認する分担額を確認できません。",
                 status_code=422,
             )
-        agreed_share = round(float(agreed_share), 2)
+        try:
+            agreed_share = round(float(agreed_share), 2)
+        except (TypeError, ValueError) as exc:
+            raise EnishiError(
+                code="INVALID_APPROVAL_SELECTION",
+                message="分担額の形式が不正です。",
+                status_code=422,
+            ) from exc
 
         agreement_value = {
             "title": proposal.get("title", ""),

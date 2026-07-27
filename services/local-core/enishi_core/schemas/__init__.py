@@ -189,7 +189,24 @@ class ApprovalRead(BaseModel):
 
 
 class ApprovalResolutionRequest(BaseModel):
+    """承認解決のワイヤ表現。スキーマ層にドメイン語彙を持たない（Phase G5）。
+
+    `NegotiationCreate`（Phase B）/ `RemoteNegotiationCreate`（Phase F4-b）と同じパターン:
+    ドメイン固有の上書き内容は不透明な `proposal_override` に入れる。
+
+    後方互換: 旧来の `selected_slot`（meeting.schedule固有のフラット形式）も引き続き
+    受理し、`proposal_override` が未指定のときだけそこへ畳み込む。両方指定された場合は
+    `proposal_override` を優先する。
+    """
+
     selected_slot: dict[str, str] | None = None
+    proposal_override: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def fold_legacy_selected_slot(self) -> "ApprovalResolutionRequest":
+        if self.proposal_override is None and self.selected_slot is not None:
+            self.proposal_override = dict(self.selected_slot)
+        return self
 
 
 class AuditLogRead(BaseModel):
