@@ -594,6 +594,7 @@ def _request_human_decision(
     proposed_action: str,
     peer_node_id: str,
     peer_personal_agent_id: str,
+    own_personal_agent_id: str = "",
 ) -> Approval:
     # Phase F2: 承認payloadの脱ドメイン化。ドメイン非依存の `proposal` / `public_context` を
     # ドメインに組み立てさせる。`selected_slot` / `candidate_slots` の後方互換キーは
@@ -623,6 +624,11 @@ def _request_human_decision(
             "decision_confidence": decision.confidence,
             "peer_node_id": peer_node_id,
             "peer_personal_agent_id": peer_personal_agent_id,
+            # Phase G6: このセッションで自分がinitiator/responderのどちらであっても、
+            # 応答を組み立てる際の送信元IDを一意に復元できるようにする
+            # （`resolve_remote_approval` 側の `negotiation.responder_agent_id` 決め打ちを
+            # 廃止するため。空文字は「レガシー・分離ID運用でないセッション」を表す）。
+            "own_personal_agent_id": own_personal_agent_id,
         },
         commit=False,
     )
@@ -769,7 +775,15 @@ def resolve_remote_approval(
                 ]
             )
         }
-    own_personal_id = negotiation.responder_agent_id or ""
+    # Phase G6: 以前は「自分は常にresponder」を前提に `negotiation.responder_agent_id` を
+    # 決め打ちしていたが、initiator側で相手からのPROPOSE/COUNTERがapproval_requiredに
+    # なるケース（自分がinitiatorのセッション）ではそれが相手のpersonal-agent IDになり
+    # 誤る。`_request_human_decision` が保存した `own_personal_agent_id`（Phase G6で追加）を
+    # 優先し、無ければ旧来どおり responder_agent_id にフォールバックする
+    # （この変更以前に作られた承認レコード＝常にresponder側の後方互換）。
+    own_personal_id = str(
+        approval.payload.get("own_personal_agent_id") or negotiation.responder_agent_id or ""
+    )
     peer_personal_id = str(
         approval.payload.get("peer_personal_agent_id")
         or negotiation.initiator_agent_id
@@ -820,6 +834,67 @@ def resolve_remote_approval(
         payload={"approval_id": approval.id, "action_type": approval.action_type},
     )
     return approval
+
+
+def _resolve_own_identity(
+    session_db: Session, negotiation: NegotiationSession, receiver: str
+) -> tuple[PersonalAgent | None, CloneAgent]:
+    """このセッションで自分がinitiator/responderのどちらかを判定し、自ノードのクローンを解決する。
+
+    Phase G6（Codexレビュー指摘の既存バグ修正）: 受信処理は長らく「自分は常に
+    responder」という前提で `negotiation.responder_agent_id` を無条件にローカル
+    `PersonalAgent` として引いていた。これは相手からREQUESTを受けてresponderに
+    なったセッションでは正しいが、自分がinitiatorとして開始した交渉
+    （`start_remote_negotiation`）で相手からPROPOSE/COUNTERが返ってきたセッション
+    では前提が崩れる： `NegotiationSession.responder_agent_id` にはそのケースでは
+    「相手」のpersonal-agent IDが入っているため（`start_remote_negotiation` の
+    `responder_agent_id=peer_personal_id`）、常にローカルで見つからず
+    `CLONE_REVIEW_REQUIRED` になり、initiator側がCOUNTERを処理できなかった。
+
+    このエンベロープの `receiver_agent_id`（＝この配送の宛先＝自分自身、呼び出し元で
+    `receiver` として渡される）を `negotiation.initiator_agent_id` /
+    `negotiation.responder_agent_id` のどちらと一致するかで判定し、一致した側を
+    「自分」として扱う。分離ID運用でないレガシーセッション（分離IDを使わない相手との
+    交渉で両方とも None）では、従来どおりuser_idを絞らずアクティブなクローンを1つ探す
+    （受信側の既存挙動を変えない）。
+    """
+    own_agent_id: str | None = None
+    if (
+        negotiation.responder_agent_id is not None
+        and negotiation.responder_agent_id == receiver
+    ):
+        own_agent_id = negotiation.responder_agent_id
+    elif (
+        negotiation.initiator_agent_id is not None
+        and negotiation.initiator_agent_id == receiver
+    ):
+        own_agent_id = negotiation.initiator_agent_id
+
+    if own_agent_id is None:
+        if negotiation.responder_agent_id is not None or negotiation.initiator_agent_id is not None:
+            # 分離ID運用のセッションなのに、宛先がどちらの記録済みIDとも一致しない。
+            raise EnishiError(
+                code="AGENT_IDENTITY_MISMATCH",
+                message="本人エージェントIDを確認できません。",
+                status_code=403,
+            )
+        return None, _find_active_clone(session_db)
+
+    personal = session_db.get(PersonalAgent, own_agent_id)
+    if personal is None or personal.active_clone_id is None:
+        raise EnishiError(
+            code="CLONE_REVIEW_REQUIRED",
+            message="有効化済みのクローンがありません。",
+            status_code=409,
+        )
+    clone = session_db.get(CloneAgent, personal.active_clone_id)
+    if clone is None or clone.status != CloneStatus.ACTIVE.value:
+        raise EnishiError(
+            code="CLONE_REVIEW_REQUIRED",
+            message="有効化済みのクローンがありません。",
+            status_code=409,
+        )
+    return personal, clone
 
 
 def _handle_envelope(
@@ -895,24 +970,7 @@ def _handle_envelope(
     negotiation.last_sequence = sequence
 
     if message_type in ("PROPOSE", "COUNTER"):
-        personal = None
-        if negotiation.responder_agent_id is not None:
-            personal = session_db.get(PersonalAgent, negotiation.responder_agent_id)
-            if personal is None or personal.active_clone_id is None:
-                raise EnishiError(
-                    code="CLONE_REVIEW_REQUIRED",
-                    message="有効化済みのクローンがありません。",
-                    status_code=409,
-                )
-            clone = session_db.get(CloneAgent, personal.active_clone_id)
-            if clone is None or clone.status != CloneStatus.ACTIVE.value:
-                raise EnishiError(
-                    code="CLONE_REVIEW_REQUIRED",
-                    message="有効化済みのクローンがありません。",
-                    status_code=409,
-                )
-        else:
-            clone = _find_active_clone(session_db)
+        personal, clone = _resolve_own_identity(session_db, negotiation, receiver)
         domain = get_domain(negotiation.intent)
         request_payload = _request_payload(session_db, session_id)
         own_position = domain.derive_own_position(
@@ -951,6 +1009,7 @@ def _handle_envelope(
                 proposed_action=reply["proposed_action"],
                 peer_node_id=sender_node,
                 peer_personal_agent_id=sender,
+                own_personal_agent_id=sender_personal_id,
             )
             session_db.commit()
             return {"message_id": message_id, "action": "approval_required"}

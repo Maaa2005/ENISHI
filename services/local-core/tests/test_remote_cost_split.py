@@ -390,6 +390,106 @@ def test_cost_split_remote_round_trip_reaches_agreement(
 
 
 # ---------------------------------------------------------------------------
+# Phase G6 本命: 自分がinitiatorとしてcost.splitを開始し、相手がACCEPTではなく
+# COUNTERを返してきても、initiator側で判断が下る（既存バグの回帰テスト）。
+#
+# 修正前は `_handle_envelope` の PROPOSE/COUNTER 分岐が
+# `negotiation.responder_agent_id`（このセッションでは相手のpersonal-agent ID）を
+# 常にローカル `PersonalAgent` として引こうとし、見つからず `CLONE_REVIEW_REQUIRED`
+# (409) で拒否していた（Codexレビュー指摘、Phase G6で修正）。
+# ---------------------------------------------------------------------------
+
+
+def test_cost_split_remote_initiator_processes_counter_from_peer(
+    client: TestClient, auth_headers: dict[str, str], tmp_path: Path
+) -> None:
+    from enishi_core.database import get_session
+    from enishi_core.models import NegotiationDecision, NegotiationSession
+    from enishi_core.services.remote_negotiation import process_inbox, start_remote_negotiation
+
+    peer_identity, peer_private_key = _make_peer_identity(tmp_path)
+    user_id = _user(client, auth_headers, "送信側")
+    _activate_clone(client, auth_headers, user_id)
+    _register_peer(
+        client,
+        auth_headers,
+        agent_id=peer_identity.agent_id,
+        personal_agent_id="pa_peer_out",
+        public_key=peer_identity.public_key_b64,
+        capabilities=_V2_COST_SPLIT_CAPABILITIES,
+    )
+    local_personal_id, local_node_id = _local_ids(client, auth_headers, user_id)
+
+    session = next(get_session())
+    relay = _FakeRelay()
+    try:
+        # proposed_share(6000) をデフォルトの reservation(=total*0.5=5000)より上に
+        # 設定し、initiator側にも譲歩の余地(floor=5000)を作る（COUNTER-応答が
+        # 起きるようにするため）。
+        negotiation = start_remote_negotiation(
+            session,
+            relay,
+            user_id=user_id,
+            peer_agent_id=peer_identity.agent_id,
+            intent="cost.split",
+            payload={
+                "title": "遠征費の割り勘",
+                "total_amount": 10000.0,
+                "currency": "JPY",
+                "proposed_share": 6000.0,
+                "deadline": None,
+            },
+        )
+        session_id = negotiation.id
+    finally:
+        session.close()
+
+    assert len(relay.sent) == 2
+    assert relay.sent[0]["message_type"] == "REQUEST"
+    assert relay.sent[1]["message_type"] == "PROPOSE"
+    assert relay.sent[1]["delta"] == {"proposed_share": 6000.0}
+
+    # 相手は即ACCEPTせず、COUNTER(5500)を返してくる。
+    counter_env = _build_from_peer(
+        session_id=session_id,
+        sequence=3,
+        message_type="COUNTER",
+        peer_personal_id="pa_peer_out",
+        local_personal_id=local_personal_id,
+        peer_node_id=peer_identity.agent_id,
+        local_node_id=local_node_id,
+        private_key=peer_private_key,
+        delta={"proposed_share": 5500.0},
+    )
+    relay.inbox = [{"delivery_id": "d1", "envelope": counter_env}]
+    session = next(get_session())
+    try:
+        result = process_inbox(session, relay)
+        # 修正前はここで CLONE_REVIEW_REQUIRED (409) により "rejected" になっていた。
+        assert [r["action"] for r in result["results"]] == ["processed"]
+
+        refreshed = session.get(NegotiationSession, session_id)
+        assert refreshed is not None
+        decision = (
+            session.query(NegotiationDecision)
+            .filter(NegotiationDecision.session_id == session_id)
+            .first()
+        )
+        assert decision is not None
+        assert decision.outcome == "counter"
+    finally:
+        session.close()
+
+    reply_envelope = relay.sent[-1]
+    assert reply_envelope["message_type"] == "COUNTER"
+    assert reply_envelope["delta"] == {"proposed_share": 5750.0}
+    # 応答の送信元がinitiator自身の本人エージェントIDであること
+    # （相手のpersonal-agent IDのままだと相手になりすます形になってしまう）。
+    assert reply_envelope["sender_agent_id"] == local_personal_id
+    assert reply_envelope["receiver_agent_id"] == "pa_peer_out"
+
+
+# ---------------------------------------------------------------------------
 # 新規テスト1（応答側）: REQUEST+PROPOSEを受信し、自動でACCEPTを返す（`next_action`経由）。
 # ---------------------------------------------------------------------------
 
