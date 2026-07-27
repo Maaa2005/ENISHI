@@ -499,59 +499,28 @@ def run_cost_split_negotiation(
     add_message(initiator, responder, MessageType.REQUEST, payload=request_payload)
 
     responder_policy = _cost_split_policy(responder)
-    max_auto_accept_amount = responder_policy["max_auto_accept_amount"]
 
     offer = round(proposed_share, 2)
 
-    # 事前ガード（全ドメイン共通・enishi_core.domains.common.evaluate_common_guards）
-    # 委任OFF / confidence閾値未満 / relationship が承認要求 -> 承認エスカレーション。
-    # ローカル交渉には relay 経由の相手 personal agent id が無いため、
-    # 関係性ポリシーの照合キーには initiator のクローンIDを代用する。
-    delegation_ok = delegation_enabled(
-        session_db, responder.user_id, "cost_split_negotiation", default=True
-    )
-    guard = evaluate_common_guards(
-        clone=responder,
-        delegation_enabled=delegation_ok,
-        peer_personal_agent_id=initiator.id,
-        not_delegated_reason_code="cost_split_negotiation_not_delegated",
-    )
-    guard_reason_codes = [*guard.pre_reason_codes, *guard.post_reason_codes]
-    if guard_reason_codes:
-        create_negotiation_approval(
-            session_db,
-            responder,
-            negotiation,
-            _agreed_payload(
-                title=title,
-                total_amount=total_amount,
-                currency=currency,
-                agreed_share=offer,
-                deadline=deadline,
-            ),
-            reason=guard_reason_codes[0],
-            sequence=len(messages) + 1,
+    # Phase G3: 共通ガード（委任/confidence/relationship、enishi_core.domains.common.
+    # evaluate_common_guards）は、遠隔経路（decide_remote_reply）と同じく手番ごとに
+    # その手番を打つ本人のクローンで評価する。交渉開始時に responder だけ1回評価する
+    # 設計では、開始後に人間が委任を切る・confidence が下がる・関係性設定を変えても
+    # 反映されない＝権限を持っているはずの人間が途中で降りられない。ここでの1つ目の
+    # 評価は round 1 の responder の手番（下の ZOPA 事前判定はその手番の代わりに
+    # 決着をつけるドライバの最適化なので、その手前でも同じガードを通す）。
+    def guard_reason(acting: CloneAgent, peer: CloneAgent) -> str | None:
+        acting_delegation_ok = delegation_enabled(
+            session_db, acting.user_id, "cost_split_negotiation", default=True
         )
-        return negotiation
-
-    if offer <= max_auto_accept_amount:
-        add_message(responder, initiator, MessageType.ACCEPT, delta={"agreed_share": offer})
-        negotiation.status = NegotiationStatus.AGREED.value
-        negotiation.result = {"agreed_share": offer, "rounds": 1}
-        create_agreement(
-            session_db,
-            negotiation,
-            _agreed_payload(
-                title=title,
-                total_amount=total_amount,
-                currency=currency,
-                agreed_share=offer,
-                deadline=deadline,
-            ),
+        acting_guard = evaluate_common_guards(
+            clone=acting,
+            delegation_enabled=acting_delegation_ok,
+            peer_personal_agent_id=peer.id,
+            not_delegated_reason_code="cost_split_negotiation_not_delegated",
         )
-        session_db.commit()
-        session_db.refresh(negotiation)
-        return negotiation
+        codes = [*acting_guard.pre_reason_codes, *acting_guard.post_reason_codes]
+        return codes[0] if codes else None
 
     def record_decision(
         decider: CloneAgent,
@@ -627,6 +596,13 @@ def run_cost_split_negotiation(
     # （standing > U）と常に同じ入り口に到達する。ここでの事前判定はラウンド1と同じ
     # reject/escalate の分岐（max_negotiable_amount / high_value 承認）を踏襲しつつ、
     # 無駄なラウンドを回さずに理由コード "no_zone_of_agreement" を記録するためのものである。
+    # ZOPA 事前判定は round 1 の responder 手番の代わりに決着をつけるので、その手番の
+    # ガードをここで先に通す（下のラウンドループの round 1 と同じ扱い）。
+    initial_guard_reason = guard_reason(responder, initiator)
+    if initial_guard_reason is not None:
+        escalate(responder, reason=initial_guard_reason, round_number=1, standing=offer)
+        return negotiation
+
     initiator_policy = _cost_split_policy(initiator)
     zopa_floor = min(
         round(total_amount * (1 - initiator_policy["reservation_ratio"]), 2), offer
@@ -663,6 +639,20 @@ def run_cost_split_negotiation(
         acting = responder if turn == "responder" else initiator
         other = initiator if turn == "responder" else responder
         my_last_offer = x_r if turn == "responder" else x_i
+
+        # Phase G3: 手番ごとに、その手番を打つ本人のガードを評価する（毎ラウンド評価）。
+        # round 1 の responder はすでに ZOPA 事前判定の手前で評価済みだが、そちらを
+        # 通らずここへ来た（ZOPA が存在した）場合も同じ判定を通すために再度呼ぶ
+        # （評価対象・入力が変わらないため冪等。DBを書き換えない純粋な読み取り判定）。
+        round_guard_reason = guard_reason(acting, other)
+        if round_guard_reason is not None:
+            escalate(
+                acting,
+                reason=round_guard_reason,
+                round_number=round_number,
+                standing=standing,
+            )
+            return negotiation
 
         high_value_approval_required = False
         if turn == "responder":

@@ -743,6 +743,104 @@ def test_cost_split_remote_delegation_off_forces_approval_even_within_budget(
 
 
 # ---------------------------------------------------------------------------
+# Phase G3 本命: 同じ本人設定・同じ依頼に対して、ローカル経路と遠隔経路が
+# 同じ判断（同じ outcome）に到達する。
+#
+# 統一前は、ローカル (`run_cost_split_negotiation`) だけが `max_auto_accept_amount`
+# との単純比較による即時ACCEPT分岐を持ち、遠隔 (`decide_remote_reply`) は最初から
+# `next_action` を使っていたため、同じ設定
+# （`max_auto_accept=5000` / `preferred_ratio=0.1` / `total=10000` / `offer=3000`）で
+# ローカルはACCEPT・遠隔はCOUNTERという食い違いが起きていた（Codexレビュー指摘）。
+# ---------------------------------------------------------------------------
+
+
+def test_local_and_remote_reach_same_outcome_for_same_person_settings(
+    client: TestClient, auth_headers: dict[str, str], tmp_path: Path
+) -> None:
+    _cost_split_policy = {
+        "max_auto_accept_amount": 5000.0,
+        "max_negotiable_amount": 30000.0,
+        "reservation_ratio": 0.5,
+        "concession_ratio": 0.5,
+    }
+    _cost_split_preference = {"preferred_ratio": 0.1}
+
+    from enishi_core.database import get_session
+    from enishi_core.domains.cost_split import run_cost_split_negotiation
+    from enishi_core.models import NegotiationMessage
+
+    # --- ローカル経路 ---
+    local_initiator = _user(client, auth_headers, "ローカル依頼側")
+    local_responder = _user(client, auth_headers, "ローカル応答側")
+    _activate_clone(client, auth_headers, local_initiator)
+    local_responder_clone_id = _activate_clone(client, auth_headers, local_responder)
+    _set_cost_split_profile(
+        local_responder_clone_id, policy=_cost_split_policy, preference=_cost_split_preference
+    )
+
+    session = next(get_session())
+    try:
+        local_negotiation = run_cost_split_negotiation(
+            session,
+            initiator_user_id=local_initiator,
+            responder_user_id=local_responder,
+            title="ローカルvs遠隔の一致確認",
+            total_amount=10000.0,
+            currency="JPY",
+            proposed_share=3000.0,
+        )
+        local_messages = (
+            session.query(NegotiationMessage)
+            .filter(NegotiationMessage.session_id == local_negotiation.id)
+            .order_by(NegotiationMessage.sequence)
+            .all()
+        )
+        # REQUEST の直後にローカルでも即ACCEPTせず、遠隔と同じCOUNTER(2000)が出る。
+        assert local_messages[1].message_type == "COUNTER"
+        local_first_reply = dict(local_messages[1].delta)
+    finally:
+        session.close()
+
+    # --- 遠隔経路 ---
+    local_personal_id, local_node_id, peer_agent_id, peer_priv, remote_clone_id = (
+        _setup_local_responder(client, auth_headers, tmp_path)
+    )
+    _set_cost_split_profile(
+        remote_clone_id, policy=_cost_split_policy, preference=_cost_split_preference
+    )
+    session_id = "remote-parity-check"
+    relay = _FakeRelay()
+    relay.inbox = [
+        {"delivery_id": "d1", "envelope": env}
+        for env in _request_and_propose_from_peer(
+            session_id,
+            "pa_peer",
+            local_personal_id,
+            peer_agent_id,
+            local_node_id,
+            peer_priv,
+            total_amount=10000.0,
+            proposed_share=3000.0,
+        )
+    ]
+    from enishi_core.services.remote_negotiation import process_inbox
+
+    session = next(get_session())
+    try:
+        result = process_inbox(session, relay)
+        assert [r["action"] for r in result["results"]] == ["processed", "processed"]
+    finally:
+        session.close()
+
+    remote_reply_envelope = relay.sent[-1]
+    assert remote_reply_envelope["message_type"] == "COUNTER"
+
+    # ローカル・遠隔とも、同じ判断（COUNTER）に、同じ譲歩額（2000）で到達する。
+    assert local_first_reply == {"proposed_share": 2000.0}
+    assert remote_reply_envelope["delta"] == {"proposed_share": 2000.0}
+
+
+# ---------------------------------------------------------------------------
 # 新規テスト6: 自然言語 → 遠隔 cost.split の通し（F5の成果そのもの）。
 # ---------------------------------------------------------------------------
 

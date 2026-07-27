@@ -129,7 +129,9 @@ def test_offer_within_auto_accept_agrees_in_one_round(
     client: TestClient, auth_headers: dict[str, str], pair: tuple[str, str, str]
 ) -> None:
     initiator, responder, _responder_clone_id = pair
-    # デフォルト max_auto_accept_amount = 5000.0
+    # Phase G3以降、ローカルの即時ACCEPT分岐（max_auto_accept_amount比較）は廃止され、
+    # next_action の判断（デフォルト preferred_ratio=0.5 なので opening=total*0.5=10000、
+    # standing=3000<=opening のため responder が round1 でACCEPT）で同じ結果になる。
     negotiation = _cost_split(
         client,
         auth_headers,
@@ -723,6 +725,102 @@ def test_max_rounds_parity_independent_initiator_can_be_final_decider(
     # decider_clone_id を参照するため initiator が送信者になる。
     assert final["sender_agent_id"] == initiator_clone_id
     assert final["receiver_agent_id"] == responder_clone_id
+
+
+# ---------------------------------------------------------------------------
+# Phase G3: ローカル `cost.split` を遠隔経路（decide_remote_reply）へ寄せる統一。
+# 即時ACCEPT分岐の廃止と、共通ガードの毎ラウンド評価を検証する。
+# ---------------------------------------------------------------------------
+
+
+def test_confidence_drop_mid_negotiation_forces_escalation_from_next_round(
+    client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Phase G3 新規: 交渉が始まったあとに人間が委任を切る／confidenceを閾値未満へ下げると、
+    以降のラウンドでは自動合意せず承認へエスカレーションする（毎ラウンド評価の意味そのもの）。
+
+    共通ガードを交渉開始時に1回だけ評価する設計では、開始後に人間が権限設定を変えても
+    進行中の交渉には反映されない＝権限を持っているはずの人間が途中で降りられない。
+    ここでは round 2 の手番からだけガードが落ちる状況をモンキーパッチで再現し、
+    round 1 は通常どおりCOUNTERが出るのに round 2 では次の一手を打つ前にガードで
+    止まり承認へ回ることを確認する。
+    """
+    import dataclasses
+
+    import enishi_core.domains.cost_split as cost_split_module
+    from enishi_core.domains.common import evaluate_common_guards as real_evaluate_common_guards
+
+    calls = {"n": 0}
+
+    def patched_guard(
+        *,
+        clone: Any,
+        delegation_enabled: bool,
+        peer_personal_agent_id: str,
+        not_delegated_reason_code: str,
+    ) -> Any:
+        calls["n"] += 1
+        result = real_evaluate_common_guards(
+            clone=clone,
+            delegation_enabled=delegation_enabled,
+            peer_personal_agent_id=peer_personal_agent_id,
+            not_delegated_reason_code=not_delegated_reason_code,
+        )
+        if calls["n"] >= 3:
+            # round1 の責任者(responder)の手番はガード呼び出し2回分（ZOPA事前判定の手前+
+            # ラウンドループ内）で消費される。3回目からは round2 の手番であり、そこから
+            # 「交渉中に人間がconfidenceを閾値未満へ下げた」状況を模す。
+            result = dataclasses.replace(
+                result,
+                pre_reason_codes=[*result.pre_reason_codes, "clone_confidence_below_threshold"],
+            )
+        return result
+
+    monkeypatch.setattr(cost_split_module, "evaluate_common_guards", patched_guard)
+
+    negotiation, messages = _slow_convergence_negotiation(client, auth_headers)
+
+    assert negotiation["status"] == "waiting_approval"
+    counters = [m for m in messages if m["message_type"] == "COUNTER"]
+    # round1のCOUNTERまでは出るが、round2でnext_actionの判断に進む前にガードで止まる
+    # （本来なら round2 も COUNTER のはずが、ここでは発生していないことを確認する）。
+    assert len(counters) == 1
+
+    approval_id = negotiation["pending_approval_id"]
+    assert approval_id is not None
+    approvals = client.get("/v1/approvals", headers=auth_headers).json()
+    approval = next(a for a in approvals if a["id"] == approval_id)
+    assert approval["payload"]["reason"] == "clone_confidence_below_threshold"
+
+
+def test_default_settings_without_manual_overrides_reach_auto_agreement(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """Phase G3 新規: 手動でconfidenceやpolicyを底上げしない素のデフォルト設定でも、
+    現実的な依頼はローカルで自動合意に到達できる（統一で実用性が壊れていないことの担保）。
+
+    クローン活性化時に confidence_score が閾値(0.6)まで引き上げられる仕組み
+    （`services/clones.py::activate_clone`、Phase E由来）と、委任がデフォルトで
+    有効なことにより、共通ガードを毎ラウンド評価する設計に変えても、常識的な金額で
+    あれば承認エスカレーションを経ずに自動合意する。
+    """
+    initiator = _create_user(client, auth_headers, "デフォルト依頼側")
+    responder = _create_user(client, auth_headers, "デフォルト応答側")
+    _activate_clone(client, auth_headers, initiator)
+    _activate_clone(client, auth_headers, responder)
+    # 手動での confidence 底上げ・policy/preference の上書きは一切行わない。
+
+    negotiation = _cost_split(
+        client,
+        auth_headers,
+        initiator,
+        responder,
+        total_amount=10000.0,
+        proposed_share=3000.0,
+    )
+    assert negotiation["status"] == "agreed"
+    assert negotiation["result"]["agreed_share"] == 3000.0
+    assert negotiation["result"]["rounds"] == 1
 
 
 def test_on_approval_resolved_falls_back_to_responder_without_decider_clone_id(
