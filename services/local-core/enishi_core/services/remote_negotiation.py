@@ -93,6 +93,89 @@ def _require_peer_capability(peer: PeerAgent, intent: str) -> None:
         )
 
 
+def _require_peer_capability_for_receive(peer: PeerAgent, intent: str) -> None:
+    """受信REQUESTの能力宣言チェック（Phase G2）。送信側 `_require_peer_capability()` とは
+
+    あえて別関数にする（守っている対象が違うため）:
+
+    - 送信側の「相手が宣言していない intent は送らない」は**相手を守る**判定である。
+      相手が処理できないものを送りつけないための配慮。
+    - 受信側で同じ判定をしても**こちら（このENISHIノード）は何も守られない**。
+      `intent` を受信できている時点で `get_domain(intent).supports_remote` は
+      既に確認済みであり、このノードは実装済みでその intent を処理できる。
+
+    空の `capabilities` は「相手は meeting.schedule しかできない」という制限の表明では
+    なく、「こちらがまだ相手のv2名刺を持っていない（名刺交換前・未更新）」というだけの
+    意味しか持たない。しかも相手がその intent のREQUESTを実際に送ってきている時点で、
+    相手がそれを扱える一次証拠になっている。空を制限と解釈すると、名刺をまだ交換・
+    更新していないだけの正当なピアと相互運用できなくなり、このブランチの後方互換方針
+    （v1ピアを切らない）にも反する。
+
+    一方、名刺が**非空**でその intent を含まない場合は拒否する。これは「自分の宣言と
+    矛盾する振る舞いをしている相手」への防御として筋が通る（対応不可と自己申告した
+    はずの intent を送ってくるのは、なりすまし・実装不具合・名刺の陳腐化のいずれかで
+    あり、無条件に信用してよい理由がない）。
+    """
+    capabilities = peer.capabilities or {}
+    if not capabilities:
+        return
+    intents = capabilities.get("supported_intents", [])
+    protocols = capabilities.get("protocol_versions", [])
+    if intent not in intents:
+        raise EnishiError(
+            code="PEER_CAPABILITY_MISMATCH",
+            message="接続相手の名刺に宣言のない交渉種別です。",
+            status_code=409,
+            details={"intent": intent},
+        )
+    if _PROTOCOL not in protocols:
+        raise EnishiError(
+            code="PEER_CAPABILITY_MISMATCH",
+            message="接続相手と共通のAUN Protocol versionがありません。",
+            status_code=409,
+            details={"protocol": _PROTOCOL},
+        )
+
+
+def _require_receivable_request(
+    session_db: Session, intent: str, payload: dict[str, Any], sender_node: str
+) -> None:
+    """受信REQUESTを永続化する前に、送信側と同等のガードを通す（Phase G2）。
+
+    送信側（`start_remote_negotiation`）は `get_domain()` / `domain.supports_remote` /
+    `domain.validate_request()` / `_require_peer_capability()` の4点をワイヤに載せる前に
+    通しているが、受信側はこれまで素通りだった（Codexレビュー指摘）。相手が壊れた・未対応の
+    REQUESTを送ってきても検証済み署名さえあればセッションが永続化されてしまう穴を塞ぐ。
+    能力宣言の整合チェックだけは送信側と別判定（`_require_peer_capability_for_receive`）を
+    使う。理由はそちらのdocstringを参照。
+    """
+    domain = get_domain(intent)  # 未登録intentは UNKNOWN_INTENT で拒否
+    if not domain.supports_remote:
+        raise EnishiError(
+            code="INTENT_NOT_SUPPORTED_FOR_REMOTE_REQUEST",
+            message="このドメインは遠隔交渉の受信に対応していません。",
+            status_code=422,
+            details={"intent": intent},
+        )
+    domain.validate_request(
+        _RemoteNegotiationRequest(
+            intent=intent,
+            initiator_user_id="",
+            responder_user_id="",
+            payload=payload,
+        )
+    )
+    peer = session_db.get(PeerAgent, sender_node)
+    if peer is None:
+        raise EnishiError(
+            code="PEER_NOT_TRUSTED",
+            message="信頼済みでないピアとは交渉できません。",
+            status_code=403,
+            details={"agent_id": sender_node},
+        )
+    _require_peer_capability_for_receive(peer, intent)
+
+
 def _find_active_clone(session_db: Session, user_id: str | None = None) -> CloneAgent:
     query = select(CloneAgent).where(CloneAgent.status == CloneStatus.ACTIVE.value)
     if user_id is not None:
@@ -763,6 +846,9 @@ def _handle_envelope(
     )
 
     if message_type == "REQUEST":
+        request_intent = str(envelope.get("intent", INTENT_MEETING_SCHEDULE))
+        request_payload_dict = dict(envelope.get("payload", {}))
+        _require_receivable_request(session_db, request_intent, request_payload_dict, sender_node)
         if "sender_node_id" in envelope:
             personal = session_db.get(PersonalAgent, receiver)
             if personal is None or personal.active_clone_id is None:
@@ -787,8 +873,8 @@ def _handle_envelope(
             responder_clone_id=responder_id,
             initiator_agent_id=sender if "sender_node_id" in envelope else None,
             responder_agent_id=receiver if "sender_node_id" in envelope else None,
-            intent=str(envelope.get("intent", INTENT_MEETING_SCHEDULE)),
-            topic=str(envelope.get("payload", {}).get("topic", "")),
+            intent=request_intent,
+            topic=str(request_payload_dict.get("topic", "")),
             remote_peer_agent_id=sender_node,
             last_sequence=sequence,
         )

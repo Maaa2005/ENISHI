@@ -393,10 +393,21 @@ def test_malformed_signed_payload_is_acked_and_isolated(
         session.close()
 
     assert relay.acked == ["poison-request", "poison-propose"]
+    # Phase G2: 受信REQUESTもドメイン検証を通すようになったため、この不正payload
+    # （duration_minutes が数値でない）は REQUEST の時点で INVALID_NEGOTIATION_PAYLOAD
+    # として弾かれ、セッションは永続化されない。以前は REQUEST が無検証で保存され、
+    # 後続の PROPOSE 処理中に汎用例外 MESSAGE_PROCESSING_FAILED として現れていた
+    # （このタスクが埋めた「受信側が壊れたpayloadを素通りさせる穴」そのもの）。
+    # PROPOSE はセッションが存在しないため INVALID_STATE_TRANSITION で拒否される。
+    assert result["results"][0] == {
+        "message_id": request["message_id"],
+        "action": "rejected",
+        "code": "INVALID_NEGOTIATION_PAYLOAD",
+    }
     assert result["results"][1] == {
         "message_id": propose["message_id"],
         "action": "rejected",
-        "code": "MESSAGE_PROCESSING_FAILED",
+        "code": "INVALID_STATE_TRANSITION",
     }
 
 
