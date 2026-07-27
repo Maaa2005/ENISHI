@@ -347,6 +347,69 @@ def test_meeting_schedule_wire_counter_no_common_slot_golden(
     }
 
 
+def test_meeting_schedule_wire_error_rounds_exhausted_golden(
+    client: TestClient, auth_headers: dict[str, str], tmp_path: Path
+) -> None:
+    """テスト1d: COUNTERのラウンド上限に達した場合のERRORのwire形（後方互換）。
+
+    `main` は `NO_AVAILABLE_SLOT` を送っていた。ドメイン汎用化のリファクタで
+    汎用フォールバックの `NEGOTIATION_ROUNDS_EXHAUSTED` に変わっていないかを固定する。
+    """
+    from enishi_core.database import get_session
+    from enishi_core.services.remote_negotiation import process_inbox
+
+    local_personal_id, local_node_id, peer_agent_id, peer_priv = _setup_local_responder(
+        client, auth_headers, tmp_path
+    )
+    non_overlapping = [{"start": "2099-01-01T00:00+09:00", "end": "2099-01-01T00:30+09:00"}]
+    session_id = "remote-golden-session-error"
+    relay = _FakeRelay()
+    relay.inbox = [
+        {"delivery_id": "d1", "envelope": env}
+        for env in _request_and_propose_from_peer(
+            session_id,
+            "pa_peer",
+            local_personal_id,
+            peer_agent_id,
+            local_node_id,
+            peer_priv,
+            non_overlapping,
+        )
+    ]
+    session = next(get_session())
+    try:
+        process_inbox(session, relay)
+    finally:
+        session.close()
+
+    # 1ラウンド目のCOUNTER応答が返っている状態から、相手が再度スロットのないCOUNTERを送る。
+    peer_counter_env = _build_from_peer(
+        session_id=session_id,
+        sequence=4,
+        message_type="COUNTER",
+        peer_personal_id="pa_peer",
+        local_personal_id=local_personal_id,
+        peer_node_id=peer_agent_id,
+        local_node_id=local_node_id,
+        private_key=peer_priv,
+        delta={"candidate_slots": non_overlapping},
+    )
+    relay.inbox = [{"delivery_id": "d2", "envelope": peer_counter_env}]
+    session = next(get_session())
+    try:
+        process_inbox(session, relay)
+    finally:
+        session.close()
+
+    error_envelope = relay.sent[-1]
+    assert _envelope_shape(error_envelope) == {
+        "message_type": "ERROR",
+        "intent": "meeting.schedule",
+        "payload": {},
+        "delta": {"code": "NO_AVAILABLE_SLOT"},
+    }
+
+
 def _run_approval_scenario(
     client: TestClient,
     auth_headers: dict[str, str],

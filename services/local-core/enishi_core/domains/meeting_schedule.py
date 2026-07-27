@@ -80,6 +80,8 @@ class MeetingScheduleDomain(BaseDecisionDomain):
     delegation_key: str | None = None
     supports_remote = True
     payload_model = MeetingSchedulePayload
+    # main のワイヤ互換: ラウンド枯渇時のERRORは "NO_AVAILABLE_SLOT"（旧実装のコード）。
+    remote_rounds_exhausted_code = "NO_AVAILABLE_SLOT"
 
     def validate_request(self, body: NegotiationRequestLike) -> DomainRequest:
         try:

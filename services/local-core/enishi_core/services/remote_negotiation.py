@@ -910,10 +910,10 @@ def _handle_envelope(
             _send_reply(
                 session_db, relay, negotiation, sender_personal_id, sender, sender_node,
                 "ERROR", sequence + 1,
-                {"code": "NEGOTIATION_ROUNDS_EXHAUSTED"},
+                {"code": domain.remote_rounds_exhausted_code},
             )
             negotiation.status = NegotiationStatus.FAILED.value
-            negotiation.result = {"code": "NEGOTIATION_ROUNDS_EXHAUSTED", "rounds": rounds}
+            negotiation.result = {"code": domain.remote_rounds_exhausted_code, "rounds": rounds}
     elif message_type == "ACCEPT":
         domain = get_domain(negotiation.intent)
         agreement_value = domain.agreement_value_from_accept_delta(

@@ -39,6 +39,7 @@ class DecisionDomain(Protocol):
     intent: str
     delegation_key: str | None
     supports_remote: bool
+    remote_rounds_exhausted_code: str
 
     @property
     def payload_schema(self) -> dict[str, Any]:
@@ -194,6 +195,7 @@ class BaseDecisionDomain:
     delegation_key: str | None = None
     supports_remote: bool = False
     payload_model: Any = None
+    remote_rounds_exhausted_code: str = "NEGOTIATION_ROUNDS_EXHAUSTED"
 
     @property
     def payload_schema(self) -> dict[str, Any]:
