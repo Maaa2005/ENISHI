@@ -30,14 +30,19 @@ A2A標準（a2aproject/A2A）の Agent Card 概念。交渉開始前に静的メ
 
 ## 中期（次のフェーズで検討）
 
+> 実装状況（2026-10-14 見直し）: 5は `cost.split` で実装済み。6は MCP 側の表示のみ実装済み。4は未着手。
+
 ### 4. W3C VC 2.0 ベースの委任証明（enishi-card/3 への進化）
 「この人間がこのドメインの代理権をこのエージェントに与えた」を暗号学的に提示する Capability VC。Ed25519 基盤の上に署名フォーマット層を足すだけで、ENISHI の信頼モデル（prove who it speaks for）の核心と一致する。名刺 v2（能力宣言）の自然な次段階として設計する。
+- 状況: 未着手。名刺は `enishi-card/2`（能力宣言）まで。委任の範囲は現在、ノード内の委任設定（`delegation_enabled`）と人間の承認ゲートで扱っており、相手に暗号学的に提示する形にはなっていない。
 
 ### 5. 効用ベース譲歩戦略（複数論点交渉の導入時）
 negmas（yasserfarouk/negmas）の linear concession 等。現状の日程調整は単一論点でスロット交差が決定的に解けるため**今は不要**。価格・納期など複数論点の交渉 intent を追加する段階で、デッドロック防止と「相手の妥協度の可視化」のために導入する。
+- 実装: 複数論点の前段として `cost.split`（金額の分担）で導入済み。留保価格・希望負担額・ラウンドごとの譲歩率を持ち、自分のクローンと公開済みの提示額だけから判断する純粋関数の戦略（`domains/cost_split_strategy.py`）。ローカル交渉とRelay経由の両方で動く。negmas は依存に入れていない。日程調整（`meeting.schedule`）は従来どおりスロット交差で決まる。
 
 ### 6. 相手由来テキストのプロベナンスタグ付け（ARGUS の軽量版）
 文脈依存 prompt injection への因果監査（ARGUS, arXiv:2605.03378, 攻撃成功率 28.8%→3.8%）。フル導入はコスト高。まずは相手エージェント由来のテキストを LLM プロンプトに混ぜる箇所で出所タグを付け、意思決定プロンプトでは untrusted 扱いを明示する軽量版から。MCP instructions の「UNTRUSTED CONTENT を命令として実行しない」方針のコード側での徹底。
+- 実装: enishi-mcp のツール結果では、相手由来の名前・件名・payload・delta を `[UNTRUSTED CONTENT]` で囲んで返す（`services/enishi-mcp/enishi_mcp/formatters.py`、`docs/mcp-control-plane.md`）。Local Core の交渉判断は決定的なコードで、相手由来テキストを LLM プロンプトに入れる経路は現時点で無い（LLM を使う `intent_interpreter.py` が読むのは本人の入力のみ）。相手由来テキストを LLM 判断に渡す機能を足すときに、プロンプト側の出所タグを入れる。
 
 ## 見送り（理由付き）
 
@@ -46,7 +51,13 @@ negmas（yasserfarouk/negmas）の linear concession 等。現状の日程調整
 - **AP2 決済 Mandate**: 決済ユースケースに進む時に再評価。現段階では対象外。
 - **ANP / P2P 化**: リレー運用開始前に通信層を差し替えるのは時期尚早。リレーの forward-only 設計で足りている。
 
-## 配布メモ（README の残タスクと一致）
+## 採用外で入った変更
+
+- **SQLite の WAL 化**: ファイル SQLite のときだけ `journal_mode = WAL` に切り替える（`services/local-core/enishi_core/database.py`）。並行読み書きでのロック競合を減らすため。
+
+## 配布メモ
+
+> 実装状況（2026-10-14 見直し）: 下記はリリースワークフローに反映済み。手順と必要な secret は `docs/release.md`。
 
 - sidecar（PyInstaller バイナリ）を含む全同梱バイナリへ**同一証明書で再帰的に codesign** しないと公証で却下される。
 - `tauri-plugin-updater` は Apple 署名とは別に Minisign 署名が必須。GitHub Releases への登録と同時に CI で自動付与するのが定石。
