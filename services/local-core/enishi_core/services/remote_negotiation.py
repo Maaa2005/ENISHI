@@ -897,6 +897,40 @@ def _resolve_own_identity(
     return personal, clone
 
 
+def _require_bound_to_session(
+    negotiation: NegotiationSession, envelope: dict[str, Any]
+) -> None:
+    """検証済みエンベロープが、名乗っているセッションの当事者・条件と一致するかを確かめる。
+
+    署名検証とリプレイ検査は「誰が送ったか」「二重でないか」しか見ない。信頼済みの
+    ピアなら、他人同士の交渉でも session_id と次のsequenceさえ知っていれば署名付きの
+    ACCEPTを送って合意を記録させられた（Issue #15）。session_id はログや画面に出るので
+    秘密として扱えない。ここで送信ノード・送受信者の組・intent・session_version を
+    セッションに記録済みの値と突き合わせ、合わなければ他の検証失敗と同じく拒否する。
+    """
+    sender = str(envelope.get("sender_agent_id", ""))
+    sender_node = str(envelope.get("sender_node_id", sender))
+    receiver = str(envelope.get("receiver_agent_id", ""))
+    mismatched: list[str] = []
+    if sender_node != negotiation.remote_peer_agent_id:
+        mismatched.append("sender_node_id")
+    if "sender_node_id" in envelope:
+        parties = {negotiation.initiator_agent_id, negotiation.responder_agent_id}
+        if sender == receiver or sender not in parties or receiver not in parties:
+            mismatched.append("agent_ids")
+    if str(envelope.get("intent", "")) != negotiation.intent:
+        mismatched.append("intent")
+    if envelope.get("session_version") != negotiation.session_version:
+        mismatched.append("session_version")
+    if mismatched:
+        raise EnishiError(
+            code="SESSION_BINDING_MISMATCH",
+            message="メッセージがセッションの当事者・条件と一致しません。",
+            status_code=403,
+            details={"session_id": negotiation.id, "fields": mismatched},
+        )
+
+
 def _handle_envelope(
     session_db: Session, relay: RelayTransport, envelope: dict[str, Any]
 ) -> dict[str, str]:
@@ -966,6 +1000,7 @@ def _handle_envelope(
             details={"session_id": session_id},
         )
 
+    _require_bound_to_session(negotiation, envelope)
     _save_message(session_db, session_id, envelope)
     negotiation.last_sequence = sequence
 
