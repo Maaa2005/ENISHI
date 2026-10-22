@@ -1244,9 +1244,11 @@ def process_inbox(session_db: Session, relay: RelayTransport) -> dict[str, Any]:
         flush_outbox(session_db, relay)
         relay.ack(delivery_id)
 
-    log_event(
-        session_db,
-        event_type="inbox_processed",
-        payload={"processed": len(results)},
-    )
+    # 定期ポーリングの空振りまで記録すると監査ログが「0件」で埋まるため、処理した時だけ残す。
+    if results:
+        log_event(
+            session_db,
+            event_type="inbox_processed",
+            payload={"processed": len(results)},
+        )
     return {"processed": len(results), "results": results}

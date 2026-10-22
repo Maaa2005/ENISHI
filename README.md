@@ -8,6 +8,10 @@ Today it can complete a signed two-node meeting negotiation through an untrusted
 Relay: Agent Card exchange, fingerprint trust, selective disclosure, proposal,
 human approval, and the same persisted agreement on both Macs.
 
+<img src="docs/assets/demo.gif" alt="ENISHI demo: the agent proposes a meeting slot, the user approves it, and the agreement, negotiation log, memory, clone, and audit log update." width="100%">
+
+<sub>Recorded from `./scripts/run_demo_presentation.sh` (two local nodes and a Relay, browser UI).</sub>
+
 ## Try the real flow in three steps
 
 Requires macOS 13+, Python 3.12+, [`uv`](https://docs.astral.sh/uv/), Node.js
@@ -54,7 +58,6 @@ technical point demonstrated on each screen.
   are automated but still require the maintainer's release credentials and rollout.
 - Meeting scheduling is the production-shaped negotiation implemented today;
   broader deal or task negotiation remains future work.
-- A screenshot and short demo recording still need to be published with the first release.
 
 The repository can build and verify an unsigned local `.app` and DMG now. See
 [`docs/release.md`](docs/release.md) for the signed release path.

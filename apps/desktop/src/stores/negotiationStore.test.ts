@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ApiClient } from "../services/api";
+import { EnishiApiError, type ApiClient } from "../services/api";
 import { useNegotiationStore } from "./negotiationStore";
 
 const session = {
@@ -113,6 +113,27 @@ describe("negotiationStore", () => {
     expect(state.selectedSessionId).toBe("n1");
     expect(state.messages).toEqual([message]);
     expect(state.metrics).toEqual(metrics);
+  });
+
+  it("メトリクスがない交渉でもログと判断を表示する", async () => {
+    const client = makeClient({
+      getNegotiationMetrics: vi.fn().mockRejectedValue(
+        new EnishiApiError("NEGOTIATION_NOT_FOUND", "交渉セッションのメトリクスが見つかりません。"),
+      ),
+    });
+    await useNegotiationStore.getState().select(client, "n1");
+    const state = useNegotiationStore.getState();
+    expect(state.messages).toEqual([message]);
+    expect(state.metrics).toBeNull();
+    expect(state.error).toBeNull();
+  });
+
+  it("メトリクス以外の失敗はerrorを設定する", async () => {
+    const client = makeClient({
+      getNegotiationMetrics: vi.fn().mockRejectedValue(new EnishiApiError("UNAUTHORIZED", "認証に失敗しました")),
+    });
+    await useNegotiationStore.getState().select(client, "n1");
+    expect(useNegotiationStore.getState().error).toBe("認証に失敗しました");
   });
 
   it("失敗時はerrorを設定する", async () => {
