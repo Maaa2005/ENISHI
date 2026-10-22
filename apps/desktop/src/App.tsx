@@ -41,8 +41,8 @@ const TABS: Array<[Tab, string, string, string]> = [
   ["agentSetup", "代理AI設定", "✦", "エージェント"],
   ["memories", "記憶", "▤", "エージェント"],
   ["clones", "クローン", "◉", "エージェント"],
-  ["projects", "プロジェクト", "▱", "開発"],
   ["audit", "監査ログ", "◷", "エージェント"],
+  ["projects", "プロジェクト", "▱", "開発"],
   ["tasks", "AIタスク", "+", "開発"],
   ["metrics", "メトリクス", "⌁", "開発"],
 ];

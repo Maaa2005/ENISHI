@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ApiClient } from "../services/api";
+import { EnishiApiError, type ApiClient } from "../services/api";
 import type {
   AnyNegotiationCreateParams,
   NegotiationDecisionRead,
@@ -23,6 +23,16 @@ export interface NegotiationState {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+// Relay経由で始まった交渉などはトークン実測を持たないため、メトリクスなしでも表示する。
+async function loadOptionalMetrics(client: ApiClient, sessionId: string): Promise<NegotiationMetrics | null> {
+  try {
+    return await client.getNegotiationMetrics(sessionId);
+  } catch (error) {
+    if (error instanceof EnishiApiError && error.code === "NEGOTIATION_NOT_FOUND") return null;
+    throw error;
+  }
 }
 
 export const useNegotiationStore = create<NegotiationState>((set, get) => ({
@@ -49,7 +59,7 @@ export const useNegotiationStore = create<NegotiationState>((set, get) => ({
     try {
       const [messages, metrics, decision] = await Promise.all([
         client.listNegotiationMessages(sessionId),
-        client.getNegotiationMetrics(sessionId),
+        loadOptionalMetrics(client, sessionId),
         client.getNegotiationDecision(sessionId),
       ]);
       set({ messages, metrics, decision, loading: false });

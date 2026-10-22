@@ -417,3 +417,40 @@ def test_v1_peer_without_capabilities_can_send_cost_split(
     assert relay.acked == ["d1"]
     assert result["results"] == [{"message_id": request["message_id"], "action": "processed"}]
     assert _negotiation_exists(session_id) is True
+
+
+# ---------------------------------------------------------------------------
+# 受信箱の定期ポーリング: 空振りは監査ログに残さず、処理した時だけ件数を残す。
+# ---------------------------------------------------------------------------
+
+
+def _inbox_processed_counts() -> list[Any]:
+    from enishi_core.database import get_session
+    from enishi_core.models.audit import AuditLog
+
+    session = next(get_session())
+    try:
+        rows = session.query(AuditLog).filter(AuditLog.event_type == "inbox_processed").all()
+        return [row.payload.get("processed") for row in rows]
+    finally:
+        session.close()
+
+
+def test_empty_inbox_poll_does_not_write_audit_event(client: TestClient) -> None:
+    relay = _FakeRelay()
+
+    for _ in range(3):
+        assert _process(relay) == {"processed": 0, "results": []}
+
+    assert _inbox_processed_counts() == []
+
+
+def test_inbox_poll_with_deliveries_writes_one_audit_event(client: TestClient) -> None:
+    relay = _FakeRelay()
+    relay.inbox = [{"delivery_id": "broken", "envelope": "not-an-object"}]
+
+    result = _process(relay)
+
+    assert result["processed"] == 1
+    assert relay.acked == ["broken"]
+    assert _inbox_processed_counts() == [1]
