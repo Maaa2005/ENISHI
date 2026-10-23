@@ -4,6 +4,8 @@ AUN Protocol is ENISHI's structured wire protocol for communication between
 personal AI agents.
 
 The human-readable specification is in [SPEC.md](SPEC.md).
+The public home of the protocol is <https://github.com/Maaa2005/aun-protocol>;
+keep this directory in sync with it.
 
 The schemas, examples, and interoperability test vectors in this directory are
 licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) and
