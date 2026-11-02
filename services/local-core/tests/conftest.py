@@ -9,6 +9,23 @@ from fastapi.testclient import TestClient
 TEST_TOKEN = "test-local-token"
 
 
+@pytest.fixture(autouse=True)
+def _isolated_home(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """全テストで実ホームを触らない。
+
+    Windowsの Path.home() は HOME ではなく USERPROFILE（なければ HOMEDRIVE+HOMEPATH）を
+    参照するため、HOME だけの差し替えでは実ユーザーの Vault 等へ書き込んでしまう。
+    """
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOMEDRIVE", home.drive)
+    monkeypatch.setenv("HOMEPATH", str(home)[len(home.drive) :])
+    return home
+
+
 @pytest.fixture()
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.setenv("ENISHI_LOCAL_TOKEN", TEST_TOKEN)

@@ -564,7 +564,9 @@ def _websocket_authorized(websocket: WebSocket) -> bool:
     provided = ""
     if authorization is not None and authorization.startswith("Bearer "):
         provided = authorization.removeprefix("Bearer ")
-    return bool(expected) and secrets.compare_digest(provided, expected)
+    return bool(expected) and secrets.compare_digest(
+        provided.encode("utf-8"), expected.encode("utf-8")
+    )
 
 
 @v1_router.websocket("/tasks/{task_id}/stream")

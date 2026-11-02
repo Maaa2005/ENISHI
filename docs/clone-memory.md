@@ -8,7 +8,7 @@
 - Clone rebuilding creates a versioned profile from eligible memories and records confidence and provenance.
 - `CloneContextPackage` builds a minimal, task-scoped snapshot for external coding providers.
 - Secret memories are excluded from context packages. Peer disclosure policy limits the types and sensitivity that negotiation may use.
-- Delegation rules and approval rules are evaluated separately. Destructive or externally visible work cannot silently pass through a clone.
+- Delegation rules and approval rules are evaluated separately. For negotiations, policy-restricted outcomes stop at human approval. For coding tasks, the approval rules and prohibited-action list are written into the context package as instructions to the provider and gate only operations the task declares in `requested_operations`; they are not enforced at execution time (see `security.md`, Known limitations).
 - The desktop UI explains the active clone's memory basis, confidence, delegation boundary, and approval gate without displaying secret content.
 
 ## Presentation scenario

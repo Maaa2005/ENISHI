@@ -1,11 +1,19 @@
 # ENISHI (縁) — Your AI Agent, Negotiating on Your Behalf
 
+> **Project status: frozen.** Development of the ENISHI app stopped on
+> 2026-10-23. The protocol continues as **AUN Protocol** at
+> [github.com/Maaa2005/aun-protocol](https://github.com/Maaa2005/aun-protocol)
+> (`aun/0.3`). This repository implements `aun/0.1`–`aun/0.2` and is kept for
+> reference without further updates. See [Known limitations](#known-limitations)
+> before relying on any claim below.
+
 **ENISHI is a macOS platform where personal AI agents negotiate with each other,
 share only the minimum necessary information, and stop for human approval before
-anything becomes final.**
+a negotiated agreement becomes final.**
 
-Today it can complete a signed two-node meeting negotiation through an untrusted
-Relay: Agent Card exchange, fingerprint trust, selective disclosure, proposal,
+It can complete a signed two-node meeting negotiation through an untrusted
+Relay (signed, not end-to-end encrypted; see [Known limitations](#known-limitations)):
+Agent Card exchange, fingerprint trust, selective disclosure, proposal,
 human approval, and the same persisted agreement on both Macs.
 
 <img src="docs/assets/demo.gif" alt="ENISHI demo: the agent proposes a meeting slot, the user approves it, and the agreement, negotiation log, memory, clone, and audit log update." width="100%">
@@ -38,8 +46,8 @@ technical point demonstrated on each screen.
 | --- | --- |
 | People exchange many messages to find one slot | Agents exchange structured proposals |
 | Raw calendar context risks being overshared | Only candidate availability crosses the wire |
-| An assistant may act with unclear authority | Risky or externally visible actions stop at an expiring approval |
-| A central service becomes a trust bottleneck | Local Cores sign and verify; the Relay only stores and forwards |
+| An assistant may act with unclear authority | Negotiated agreements stop at an expiring human approval (coding-task gating is limited; see Known limitations) |
+| A central service becomes a trust bottleneck | Local Cores sign and verify; the Relay only stores and forwards (it can still read the messages it carries) |
 
 ## What works now
 
@@ -68,7 +76,7 @@ The repository can build and verify an unsigned local `.app` and DMG now. See
 
 ## How it works
 
-Each user runs a local node. Two nodes talk through a relay that only forwards messages — it never sees decrypted content or makes decisions.
+Each user runs a local node. Two nodes talk through a relay that only stores and forwards messages and makes no decisions. Messages are **signed** (Ed25519) so the receiver can verify the sender and detect tampering, and the connection to the Relay is protected by TLS in the reference deployment. Messages are **not end-to-end encrypted**: the Relay stores each envelope as plaintext JSON and can read the negotiation contents.
 
 ```
   User A's Mac                    User B's Mac
@@ -103,9 +111,11 @@ The real work happens in the **Local Core**, a FastAPI service that binds to `12
 
 ## The AUN Protocol
 
-Agents exchange structured messages, not free text. Each message has a typed `message_type`:
+Agents exchange structured messages, not free text. Each message has a typed `message_type`. The messages sent over the Relay are:
 
-`REQUEST` → `PROPOSE` → `COUNTER` → `ACCEPT` / `REJECT` → `REQUEST_APPROVAL` → `APPROVAL_RESULT` → `EXECUTE` → `RECEIPT`, plus `ERROR`.
+`REQUEST` → `PROPOSE` → (`COUNTER` up to 3 rounds) → `ACCEPT`, with `REJECT` or `ERROR` allowed at any point.
+
+Human approval is a **local** step, not a wire message: when a policy requires it, the node holds its `ACCEPT` until the user decides, and only then sends the signed reply. The schema and enum still list `REQUEST_APPROVAL`, `APPROVAL_RESULT`, `EXECUTE` and `RECEIPT`, but these are never sent between nodes and the receiver's state machine (`services/local-core/enishi_core/services/protocol_state.py`) rejects them.
 
 A negotiation is a state machine over these messages. Proposals and counter-proposals are exchanged as deltas rather than full state, so a round of haggling stays small. The schemas live in `packages/protocol/` as JSON Schema, shared between both sides.
 
@@ -113,15 +123,15 @@ A negotiation is a state machine over these messages. Proposals and counter-prop
 
 Three ideas do the heavy lifting:
 
-- **Clone agents.** When you delegate a task, ENISHI spins up a scoped agent (a "clone"). It starts in `review_required` state and cannot perform any high-privilege action until you explicitly activate it. The default profile denies destructive operations outright.
+- **Clone agents.** When you delegate a task, ENISHI spins up a scoped agent (a "clone"). It starts in `review_required` state and cannot perform any high-privilege action until you explicitly activate it. The default profile lists destructive operations as prohibited in the context package handed to the provider; this is an instruction to the provider, not an OS-level control (see Known limitations).
 - **Selective disclosure.** You configure, per peer, what your agent is allowed to reveal. A negotiating agent answers "does this slot work?" without ever transmitting the underlying calendar. Memories marked `secret` never leave the device and are never packed into a clone's context.
-- **Risk-based approval gate with expiry.** Explicitly delegated low-risk negotiations may complete automatically. Destructive, externally visible, low-confidence, or policy-restricted actions stop for human approval. Approvals carry an `expires_at`; once expired, the action can no longer run, so a stale "yes" from last week can't be replayed into an action today.
+- **Risk-based approval gate with expiry.** Explicitly delegated low-risk negotiations may complete automatically. Low-confidence or policy-restricted negotiation outcomes stop for human approval. For coding tasks the gate only applies to operations the task itself declares (see Known limitations). Approvals carry an `expires_at`; once expired, the action can no longer run, so a stale "yes" from last week can't be replayed into an action today.
 - **Explainable personal context.** The desktop app shows which local memories, relationship rules, and delegation boundaries shaped the active clone, while hiding secret memory content and keeping raw personal data off the wire.
 - **Privacy-safe audit trail.** Trust changes, signed negotiation steps, human decisions, rejected envelopes, and agreements appear in a local timeline. The UI API exposes only allow-listed metadata; memory bodies, tokens, and key material are excluded.
 
 ## Security design
 
-The threat model assumes the relay is untrusted and the other agent may be adversarial. Some of the concrete decisions:
+The threat model assumes the relay can misbehave and the other agent may be adversarial: signatures let nodes detect forged or modified messages, but the relay is not prevented from *reading* them (no end-to-end encryption). Some of the concrete decisions:
 
 - Local Core listens on `127.0.0.1` only — binding to `0.0.0.0` is explicitly disallowed.
 - Bearer token comparison uses constant-time comparison (`secrets.compare_digest`) to avoid timing leaks.
@@ -151,6 +161,39 @@ Design notes in this repo:
 - [`docs/clone-memory.md`](docs/clone-memory.md) — clones and memory
 - [`docs/mcp-control-plane.md`](docs/mcp-control-plane.md) — Codex / Claude Code control plane
 - [`docs/release.md`](docs/release.md) — signed, notarized macOS release and updater operations
+
+## Known limitations
+
+This repository is frozen, so these will not be fixed here.
+
+- **No end-to-end encryption.** Envelopes are signed (authenticity, tamper
+  detection) and travel over TLS in the reference deployment, but the Relay stores
+  each envelope as plaintext JSON (`services/relay/relay/store.py`) and can read
+  negotiation contents. Treat the Relay operator as able to read everything sent
+  through it.
+- **The coding-task approval gate is not a security boundary.** Approval triggers
+  only on the task's self-declared `requested_operations`
+  (`services/local-core/enishi_core/services/tasks.py`). The desktop UI always
+  sends an empty list (`apps/desktop/src/pages/TasksPage.tsx`), so tasks created
+  from it are never stopped for approval. Operations are not detected or blocked
+  at execution time. Codex runs with `--sandbox workspace-write`
+  (`providers/codex.py`), which can modify files in the working directory, and the
+  Claude Code adapter only passes `--add-dir`. When a task has no project, the
+  working directory is the Local Core process's current directory. The prohibited
+  actions in the clone context package are instructions to the provider, not
+  enforcement. Only run coding tasks against projects you are prepared to have
+  modified.
+- **The REQUEST_APPROVAL → APPROVAL_RESULT → EXECUTE → RECEIPT flow is not
+  implemented over the wire.** Human approval exists only as a local step before
+  `ACCEPT` is sent; remote nodes reject those four message types.
+- **Legacy `aun/0.1` receive path skips receiver binding.** Envelopes without
+  `sender_node_id` / `receiver_node_id` are not checked against the local node
+  identity (`services/remote_negotiation.py`, `AGENT_IDENTITY_MISMATCH` check
+  applies only to separated-identity envelopes).
+- **Tauri CSP is disabled** (`"csp": null` in
+  `apps/desktop/src-tauri/tauri.conf.json`).
+- **macOS only.** Windows and Linux are not supported; some tests fail on
+  Windows (POSIX permissions, symlinks, tzdata).
 
 ## Repository layout
 

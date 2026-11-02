@@ -1,3 +1,5 @@
+> **Historical document.** This describes `aun/0.2` as implemented by the frozen ENISHI app (development stopped 2026-10-23). The nine-type flow listed below is the original design, not the implemented behaviour. The current protocol is maintained at https://github.com/Maaa2005/aun-protocol (`aun/0.3`); refer to it for new work.
+
 # AUN Protocol 0.2
 
 The structured message format ENISHI agents use to talk to each other.
@@ -5,7 +7,13 @@ The structured message format ENISHI agents use to talk to each other.
 Every message shares a common envelope and carries a typed `message_type`:
 `REQUEST`, `PROPOSE`, `COUNTER`, `ACCEPT`, `REJECT`, `REQUEST_APPROVAL`,
 `APPROVAL_RESULT`, `EXECUTE`, `RECEIPT`, `ERROR`. Proposals and counters are
-exchanged as deltas rather than full state. The schemas are defined as JSON
+exchanged as deltas rather than full state.
+
+As implemented, only `REQUEST`, `PROPOSE`, `COUNTER` (at most 3 rounds), `ACCEPT`,
+`REJECT` and `ERROR` are sent between nodes. `REQUEST_APPROVAL`,
+`APPROVAL_RESULT`, `EXECUTE` and `RECEIPT` are never sent and are rejected on
+receive (`services/local-core/enishi_core/services/protocol_state.py`); human
+approval is a local step before `ACCEPT`. Messages are signed, not encrypted. The schemas are defined as JSON
 Schema under `packages/protocol/schemas/`.
 
 ## Signed representation

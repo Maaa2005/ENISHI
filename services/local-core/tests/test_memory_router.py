@@ -17,7 +17,12 @@ def _session() -> Session:
 def _configure_discovery(
     monkeypatch: pytest.MonkeyPatch, home: Path, *, enabled: bool
 ) -> None:
+    # Windowsの Path.home() は HOME ではなく USERPROFILE を参照する。
+    # 実ホームへ触れないよう両方（と HOMEDRIVE/HOMEPATH）を差し替える。
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOMEDRIVE", home.drive)
+    monkeypatch.setenv("HOMEPATH", str(home)[len(home.drive) :])
     monkeypatch.setenv(
         "ENISHI_AUTO_DISCOVER_EXTERNAL_MEMORY", "true" if enabled else "false"
     )
