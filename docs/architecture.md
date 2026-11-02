@@ -30,7 +30,7 @@ Peer Local Core
 - Production Relay configuration stores only bearer-token SHA-256 digests. Verification is constant-time, and overlapping digests for one node permit credential rotation without downtime.
 - `/health` is process liveness; `/ready` additionally verifies a SQLite write transaction and mailbox read. `/metrics` exposes aggregate counters without node, message, credential, or envelope labels.
 - The reference deployment exposes only Caddy. Relay port 8080 and Prometheus metrics remain on an internal Docker network.
-- Relationship and risk policies decide whether a proposed result can proceed or must stop at human approval.
+- Delegation, confidence, relationship, and domain policies decide whether a proposed result is agreed automatically or must stop at human approval. The confidence check applies to `meeting.schedule` and `cost.split` but not to `task.request`, which decides from its hour and deadline limits only (README, "When approval happens").
 - Coding tasks use a project-scoped context package and an explicit permission set. Level-3 operations (for example `git_push`, `rm_rf`) are rejected and Level-2 operations (for example `delete_files`, `install_dependencies`) wait for approval, but only when the task itself lists them in `requested_operations`. The Core does not detect operations at execution time, and the desktop UI always sends an empty list. See "Known limitations" in the README and `security.md`.
 - Audit APIs expose allow-listed metadata only; tokens, key material, and memory bodies are excluded.
 

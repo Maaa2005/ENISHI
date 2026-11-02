@@ -8,13 +8,15 @@
 > before relying on any claim below.
 
 **ENISHI is a macOS platform where personal AI agents negotiate with each other,
-share only the minimum necessary information, and stop for human approval before
-a negotiated agreement becomes final.**
+share only the minimum necessary information, and stop for human approval when
+the owner's policy requires it. Approval is conditional, not universal; see
+[When approval happens](#when-approval-happens).**
 
 It can complete a signed two-node meeting negotiation through an untrusted
 Relay (signed, not end-to-end encrypted; see [Known limitations](#known-limitations)):
 Agent Card exchange, fingerprint trust, selective disclosure, proposal,
-human approval, and the same persisted agreement on both Macs.
+human approval (the demo seed sets a relationship rule that forces it), and
+the same persisted agreement on both Macs.
 
 <img src="docs/assets/demo.gif" alt="ENISHI demo: the agent proposes a meeting slot, the user approves it, and the agreement, negotiation log, memory, clone, and audit log update." width="100%">
 
@@ -46,7 +48,7 @@ technical point demonstrated on each screen.
 | --- | --- |
 | People exchange many messages to find one slot | Agents exchange structured proposals |
 | Raw calendar context risks being overshared | Only candidate availability crosses the wire |
-| An assistant may act with unclear authority | Negotiated agreements stop at an expiring human approval (coding-task gating is limited; see Known limitations) |
+| An assistant may act with unclear authority | Negotiations stop at an expiring human approval when the delegation, confidence, or policy checks require it, and may otherwise agree automatically (see [When approval happens](#when-approval-happens); coding-task gating is limited, see Known limitations) |
 | A central service becomes a trust bottleneck | Local Cores sign and verify; the Relay only stores and forwards (it can still read the messages it carries) |
 
 ## What works now
@@ -125,9 +127,46 @@ Three ideas do the heavy lifting:
 
 - **Clone agents.** When you delegate a task, ENISHI spins up a scoped agent (a "clone"). It starts in `review_required` state and cannot perform any high-privilege action until you explicitly activate it. The default profile lists destructive operations as prohibited in the context package handed to the provider; this is an instruction to the provider, not an OS-level control (see Known limitations).
 - **Selective disclosure.** You configure, per peer, what your agent is allowed to reveal. A negotiating agent answers "does this slot work?" without ever transmitting the underlying calendar. Memories marked `secret` never leave the device and are never packed into a clone's context.
-- **Risk-based approval gate with expiry.** Explicitly delegated low-risk negotiations may complete automatically. Low-confidence or policy-restricted negotiation outcomes stop for human approval. For coding tasks the gate only applies to operations the task itself declares (see Known limitations). Approvals carry an `expires_at`; once expired, the action can no longer run, so a stale "yes" from last week can't be replayed into an action today.
+- **Risk-based approval gate with expiry.** Negotiations within the owner's delegation and limits may complete automatically; which checks stop them for human approval depends on the negotiation type (see [When approval happens](#when-approval-happens)). For coding tasks the gate only applies to operations the task itself declares (see Known limitations). Approvals carry an `expires_at`; once expired, the approval can no longer be approved or rejected (`APPROVAL_EXPIRED`), so a stale "yes" from last week can't be replayed into an action today.
 - **Explainable personal context.** The desktop app shows which local memories, relationship rules, and delegation boundaries shaped the active clone, while hiding secret memory content and keeping raw personal data off the wire.
 - **Privacy-safe audit trail.** Trust changes, signed negotiation steps, human decisions, rejected envelopes, and agreements appear in a local timeline. The UI API exposes only allow-listed metadata; memory bodies, tokens, and key material are excluded.
+
+## When approval happens
+
+Human approval is a per-negotiation-type policy outcome, not a universal step. The
+rules below are what the code does today.
+
+- **`meeting.schedule` (local and over the Relay) and `cost.split`.** The deciding
+  side's clone runs the shared guards (`domains/common.py`, `evaluate_common_guards`).
+  The negotiation stops for approval if the owner has not delegated that
+  negotiation type, if the clone's confidence is below 0.6
+  (`CONFIDENCE_THRESHOLD`), or if the per-peer relationship rule sets
+  `allow_auto_accept: false`. Meeting scheduling also stops for a disabled
+  `meeting_schedule.auto_accept` policy or a slot outside the preferred or inside
+  the avoided time ranges; `cost.split` also stops on its own amount limits, the
+  `high_value` approval rule, and when no agreement is reached within the round
+  limit. If none of these apply (for meetings: and a common slot exists), the
+  agent agrees without asking. Delegation is on by default and counts as
+  "not delegated" only when the owner turned that rule off. Activating a clone raises its confidence to at
+  least 0.6, so the confidence check only fires if confidence later drops (for
+  example after memories are deleted).
+- **`task.request` (local only; not sent over the Relay).** There is **no
+  confidence check and no relationship check.** The responder's clone decides
+  from its task policy (`domains/task_request.py`): with the default limits, a
+  request of up to 2 hours (`max_hours_auto_accept`) whose deadline is at least 1
+  day away (`min_deadline_margin_days`) is **agreed automatically without
+  approval**; a missing `estimated_hours` or `deadline` counts as within limits.
+  Requests of up to 4 hours (`max_hours_auto_counter`), or with too short a
+  deadline, get an automatic counter-proposal; larger requests stop for approval.
+  Approval is also required when the owner has not delegated `task_negotiation`.
+  A clone confidence of 0.3 still auto-agrees within these limits.
+- **Coding tasks.** Approval applies only to operations the task itself declares in
+  `requested_operations` (see Known limitations). Tasks created from the desktop
+  app declare none, so they start without approval.
+
+The demo and `./scripts/run_pairing_e2e.sh` stop at an approval because the seed
+(`scripts/seed_demo.py`) sets a relationship rule with `allow_auto_accept: false`
+on the presenter's node, not because every agreement requires one.
 
 ## Security design
 
@@ -149,7 +188,7 @@ lifecycle, project-scoped AI tasks, the human-approval gate, agreements, and a
 privacy-safe audit trail. Production packaging embeds Local Core as a
 self-contained macOS sidecar, but no public signed release has been published.
 
-The real two-node pairing boundary is also executable as a self-check: `./scripts/run_pairing_e2e.sh` exchanges signed Agent Cards, proves that registration stops at `pending`, requires explicit fingerprint trust, sends a request through the Relay, waits for human approval, and confirms that both nodes persist the same canonical agreement.
+The real two-node pairing boundary is also executable as a self-check: `./scripts/run_pairing_e2e.sh` exchanges signed Agent Cards, proves that registration stops at `pending`, requires explicit fingerprint trust, sends a request through the Relay, waits for human approval (forced by the seeded relationship rule, see [When approval happens](#when-approval-happens)), and confirms that both nodes persist the same canonical agreement.
 
 Codex and Claude Code can use ENISHI without opening the desktop app. The MCP control plane starts a loopback-only headless Local Core on demand, while the separate memory MCP routes durable memories to an existing Obsidian/Markdown external brain when one is available and falls back to ENISHI's internal store when none exists. The external source remains canonical; ENISHI keeps a rebuildable search index and queues writes instead of creating a second source of truth during temporary disconnects. Human approval, fingerprint trust, and disclosure changes remain in the desktop UI; opening it securely hands the same database from the headless Core to a UI-owned Core without publishing the UI token.
 

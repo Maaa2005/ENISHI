@@ -11,7 +11,11 @@ Implemented so far:
 - CLI detection is limited to `shutil.which` plus a `--version` probe. Credentials of other tools are never read.
 - External-provider credentials are not stored by ENISHI. The Local Core bearer token exists only for the app session.
 - Tauri-launched Local Core stores the node signing key in the macOS Keychain (`com.enishi.desktop`). Existing `0600` file keys are migrated on first launch and then removed. Standalone CLI demos retain the `0700` directory / `0600` file fallback.
-- Human approval of negotiation outcomes is risk-based: policy-restricted or low-confidence proposals stop for approval, while explicitly delegated low-risk negotiations may complete automatically under the configured policy. See "Known limitations" below for what this does not cover.
+- Human approval of negotiation outcomes is policy-based and differs by negotiation type; it is not applied to every agreement.
+  - `meeting.schedule` (local and over the Relay) and `cost.split` run the shared guards (`domains/common.py`, `evaluate_common_guards`): delegation turned off, clone confidence below 0.6 (`CONFIDENCE_THRESHOLD`), or a per-peer relationship rule with `allow_auto_accept: false` stop for approval. Each domain adds its own conditions (for example meeting time preferences, cost limits). Otherwise they may agree automatically.
+  - `task.request` (local only, `supports_remote = False`) does **not** check confidence or relationship rules. With the default limits it agrees automatically, without approval, for requests up to 2 hours with a deadline at least 1 day away (`domains/task_request.py`); it counters up to 4 hours; it stops for approval above that or when `task_negotiation` delegation is off. Confidence 0.3 still auto-agrees within those limits.
+  - Activating a clone raises its confidence to at least 0.6 (`services/clones.py`), so the confidence check only fires if confidence drops afterwards.
+  - Coding tasks are gated only by self-declared operations; see "Known limitations" below.
 - Negotiation messages are signed (Ed25519, RFC 8785 canonical JSON), so the receiver can verify the sender and detect tampering.
 - The Local Core is terminated when the app exits, leaving no orphan process.
 

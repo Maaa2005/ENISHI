@@ -83,7 +83,7 @@ export function TasksPage({ client, onOpenApprovals }: { client: ApiClient | nul
       <section className="task-compose panel">
         <div><label htmlFor="task-description">クローンへ依頼</label><textarea id="task-description" rows={3} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="このプロジェクトのテスト結果を要約して" /></div>
         <div className="task-options"><label>対象プロジェクト<select value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">プロジェクト指定なし</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><label>実行エージェント<select value={provider} onChange={(event) => setProvider(event.target.value as typeof provider)}><option value="mock">安全なデモ実行</option><option value="codex">Codex</option><option value="claude_code">Claude Code</option></select></label><button className="primary-button" disabled={creating || !activeClone || !description.trim()} onClick={() => void create()}>{creating ? "委任中…" : "クローンに委任"}</button></div>
-        <p className="task-safety">削除・設定変更・通信・Git操作を伴う場合は、実行前に承認画面で停止します。</p>
+        <p className="task-safety">承認画面で停止するのは、タスクが宣言した操作だけです。この画面から委任したタスクは操作を宣言しないため、承認なしですぐ実行されます（Codexは workspace-write サンドボックス）。</p>
       </section>
       {!activeClone && <p role="alert" className="alert error">稼働中のクローンがありません。先に代理AI設定を完了してください。</p>}
       {tasks.length === 0 && <section className="empty-state compact-task-empty"><div className="empty-icon">+</div><h2>タスク履歴はまだありません</h2><p>上の入力欄からクローンへ仕事を委任できます。</p></section>}
