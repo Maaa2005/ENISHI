@@ -109,10 +109,12 @@ class RelaySettings(BaseSettings):
         provided_hash = hashlib.sha256(provided.encode("utf-8")).hexdigest()
         matches: set[str] = set()
         for agent_id, token in self.plaintext_credentials():
-            if secrets.compare_digest(provided, token):
+            if secrets.compare_digest(provided.encode("utf-8"), token.encode("utf-8")):
                 matches.add(agent_id)
         for agent_id, token_hash in self.hashed_credentials():
-            if secrets.compare_digest(provided_hash, token_hash):
+            if secrets.compare_digest(
+                provided_hash.encode("utf-8"), token_hash.encode("utf-8")
+            ):
                 matches.add(agent_id)
         if len(matches) != 1:
             return None

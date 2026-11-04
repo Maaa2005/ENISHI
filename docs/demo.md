@@ -149,7 +149,7 @@ Walkthrough:
 1. **Peers** — check peer status, fingerprints, and disclosure settings.
 2. **Negotiation** — run `meeting.schedule` or `task.request` and watch the JSON messages on the timeline.
 3. **Agreements** — inspect an agreement and move it to `fulfilled` or `cancelled`.
-4. **Approvals** — approve or reject a `task.request` sitting in `waiting_approval`.
+4. **Approvals** — approve or reject a pending approval. A `task.request` only appears here if it exceeds the responder's auto-counter limit (4 hours by default) or the responder has turned off `task_negotiation` delegation; smaller requests are agreed or countered automatically.
 5. **Metrics** — run the comparison experiment against the email baseline: template, round trips, delta on/off, total tokens, message count, LLM call count, and reduction rate.
 
 ## Scheduling over the relay

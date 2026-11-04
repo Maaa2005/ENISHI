@@ -1,4 +1,6 @@
+import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 
 def test_v1_requires_token(client: TestClient) -> None:
@@ -10,6 +12,27 @@ def test_v1_requires_token(client: TestClient) -> None:
 def test_v1_rejects_wrong_token(client: TestClient) -> None:
     response = client.get("/v1/users", headers={"Authorization": "Bearer wrong-token"})
     assert response.status_code == 401
+
+
+def test_v1_rejects_non_ascii_authorization_with_401(client: TestClient) -> None:
+    # サーバーはヘッダーをlatin-1で復号するため非ASCIIのstrになる。
+    # str同士の secrets.compare_digest は TypeError（HTTP 500）になるので、401でなければならない。
+    response = client.get(
+        "/v1/users", headers={"Authorization": "Bearer トークン-é".encode()}
+    )
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "LOCAL_CORE_UNAUTHORIZED"
+
+
+def test_websocket_rejects_non_ascii_authorization(client: TestClient) -> None:
+    with pytest.raises(WebSocketDisconnect) as excinfo:
+        with client.websocket_connect(
+            "/v1/tasks/missing/stream",
+            headers={"Authorization": "Bearer é".encode()},
+        ) as websocket:
+            websocket.receive_text()
+    # ルーター依存の認証がハンドシェイク段階で拒否する（HTTP 401）。500であってはならない。
+    assert getattr(excinfo.value, "status_code", None) == 401
 
 
 def test_presentation_ui_origin_is_allowed(client: TestClient) -> None:

@@ -42,6 +42,15 @@ def test_requires_authentication(client: TestClient) -> None:
     assert bad.json()["error"]["code"] == "RELAY_UNAUTHORIZED"
 
 
+def test_non_ascii_authorization_is_unauthorized_not_server_error(client: TestClient) -> None:
+    # ヘッダーはlatin-1で復号され非ASCIIのstrになる。TypeError(500)ではなく401を返す。
+    response = client.get(
+        "/v1/messages", headers={"Authorization": "Bearer トークン-é".encode()}
+    )
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "RELAY_UNAUTHORIZED"
+
+
 def test_liveness_and_readiness_are_separate(client: TestClient) -> None:
     assert client.get("/health").json()["status"] == "ok"
     ready = client.get("/ready")

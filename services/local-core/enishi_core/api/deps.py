@@ -33,11 +33,11 @@ def require_local_token(
     if authorization is not None and authorization.startswith("Bearer "):
         provided = authorization.removeprefix("Bearer ")
 
-    if expected and secrets.compare_digest(provided, expected):
+    if expected and secrets.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
         return
 
     scoped = mcp_token()
-    if scoped and secrets.compare_digest(provided, scoped):
+    if scoped and secrets.compare_digest(provided.encode("utf-8"), scoped.encode("utf-8")):
         method = str(request.scope.get("method", ""))
         allowed = (
             method == "GET" and _MCP_READ_PATH.fullmatch(request.url.path)
